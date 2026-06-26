@@ -45,6 +45,7 @@ import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material.icons.filled.BatteryChargingFull
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.DarkMode
@@ -242,6 +243,17 @@ private fun HomeScreen(vm: MainViewModel) {
     val duplicates    by vm.duplicates.collectAsState()
     val updateState   by vm.updateState.collectAsState()
 
+    // Show "just updated" banner once after version changes
+    val currentVersion = remember {
+        runCatching { context.packageManager.getPackageInfo(context.packageName, 0).versionName }
+            .getOrDefault("")
+    }
+    val prefs = remember { context.getSharedPreferences("app_meta", android.content.Context.MODE_PRIVATE) }
+    var showWhatsNew by remember {
+        val seen = prefs.getString("whats_new_seen", "")
+        mutableStateOf(seen != currentVersion)
+    }
+
     var hasPermission by remember { mutableStateOf(hasMediaPermission(context)) }
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -319,6 +331,42 @@ private fun HomeScreen(vm: MainViewModel) {
                     primaryColor = MaterialTheme.colorScheme.primary,
                     trackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
                     label = "${(progress * 100).toInt()}%")
+            }
+        }
+
+        // ── What's New (shown once after each update) ──────────
+        if (showWhatsNew) {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(20.dp),
+                colors = CardDefaults.cardColors(MaterialTheme.colorScheme.secondaryContainer)
+            ) {
+                Row(
+                    Modifier.padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Icon(Icons.Default.CheckCircle, null,
+                        tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                        modifier = Modifier.size(28.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text("Updated to v$currentVersion",
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSecondaryContainer)
+                        Text("Home screen widget · Self-update · Bug fixes",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.8f))
+                    }
+                    IconButton(onClick = {
+                        prefs.edit().putString("whats_new_seen", currentVersion).apply()
+                        showWhatsNew = false
+                    }) {
+                        Icon(Icons.Default.Close, "Dismiss",
+                            tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                            modifier = Modifier.size(20.dp))
+                    }
+                }
             }
         }
 
