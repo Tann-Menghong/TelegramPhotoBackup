@@ -105,7 +105,6 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.core.view.WindowCompat
@@ -133,6 +132,7 @@ class MainActivity : ComponentActivity() {
     @OptIn(ExperimentalMaterial3Api::class)
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        WindowCompat.setDecorFitsSystemWindows(window, false)
         setContent {
             val vm: MainViewModel = viewModel()
             val settings by vm.settings.collectAsState()
@@ -145,16 +145,10 @@ class MainActivity : ComponentActivity() {
             }
 
             TgBackupTheme(darkTheme = isDark) {
-                // Sync status bar + nav bar icons/background with current theme
                 val view = LocalView.current
-                val bgColor = MaterialTheme.colorScheme.background
                 if (!view.isInEditMode) {
                     SideEffect {
                         val window = (view.context as android.app.Activity).window
-                        @Suppress("DEPRECATION")
-                        window.statusBarColor = bgColor.toArgb()
-                        @Suppress("DEPRECATION")
-                        window.navigationBarColor = bgColor.toArgb()
                         WindowCompat.getInsetsController(window, view).apply {
                             isAppearanceLightStatusBars = !isDark
                             isAppearanceLightNavigationBars = !isDark
