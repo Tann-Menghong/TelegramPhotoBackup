@@ -90,6 +90,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -104,7 +105,10 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
+import androidx.core.view.WindowCompat
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -141,6 +145,23 @@ class MainActivity : ComponentActivity() {
             }
 
             TgBackupTheme(darkTheme = isDark) {
+                // Sync status bar + nav bar icons/background with current theme
+                val view = LocalView.current
+                val bgColor = MaterialTheme.colorScheme.background
+                if (!view.isInEditMode) {
+                    SideEffect {
+                        val window = (view.context as android.app.Activity).window
+                        @Suppress("DEPRECATION")
+                        window.statusBarColor = bgColor.toArgb()
+                        @Suppress("DEPRECATION")
+                        window.navigationBarColor = bgColor.toArgb()
+                        WindowCompat.getInsetsController(window, view).apply {
+                            isAppearanceLightStatusBars = !isDark
+                            isAppearanceLightNavigationBars = !isDark
+                        }
+                    }
+                }
+
                 var showSettings       by remember { mutableStateOf(false) }
                 var selectedTab        by remember { mutableIntStateOf(0) }
                 var selectedPhotoIndex by remember { mutableStateOf<Int?>(null) }
@@ -354,7 +375,7 @@ private fun HomeScreen(vm: MainViewModel) {
                             style = MaterialTheme.typography.titleSmall,
                             fontWeight = FontWeight.SemiBold,
                             color = MaterialTheme.colorScheme.onSecondaryContainer)
-                        Text("Home screen widget · Self-update · Bug fixes",
+                        Text("Dark/Light theme now works · Home screen widget · Bug fixes",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.8f))
                     }
