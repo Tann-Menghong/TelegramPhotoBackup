@@ -1,0 +1,570 @@
+package com.example.tgphotobackup.ui
+
+import android.app.Application
+import android.content.ContentValues
+import android.content.Context
+import android.net.Uri
+import android.os.Build
+import android.provider.MediaStore
+import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.viewModelScope
+import androidx.work.WorkInfo
+import androidx.work.WorkManager
+import com.example.tgphotobackup.backup.BackupScheduler
+import com.example.tgphotobackup.backup.BackupWorker
+import com.example.tgphotobackup.backup.MediaStoreScanner
+import com.example.tgphotobackup.backup.NetworkChecker
+import com.example.tgphotobackup.data.AppDatabase
+import com.example.tgphotobackup.data.AppSettings
+import com.example.tgphotobackup.data.BackupRun
+import com.example.tgphotobackup.data.SettingsRepository
+import com.example.tgphotobackup.data.UploadedPhoto
+import com.example.tgphotobackup.data.contentUri
+import com.example.tgphotobackup.telegram.TelegramClient
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+
+// ─── State types ─────────────────────────────────────────────────────────────
+
+data class BackupStatus(
+    val running: Boolean = false,
+    val done: Int = 0,
+    val total: Int = 0,
+    val currentName: String = "",
+    val speedBytesPerSec: Long = 0,
+    val etaSeconds: Long = 0,
+    val lastResult: String? = null,
+    val lastError: String? = null
+)
+
+data class LibraryStats(
+    val totalOnDevice: Int = 0,
+    val totalBackedUp: Int = 0,
+    val backedUpBytes: Long = 0,
+    val lastBackupTime: Long = 0,
+    val storageToFree: Long = 0
+)
+
+data class VerifyResult(
+    val checked: Int = 0,
+    val broken: Int = 0,
+    val running: Boolean = false
+)
+
+data class UpdateState(
+    val available: Boolean = false,
+    val versionName: String = "",
+    val apkUrl: String = "",
+    val checking: Boolean = false,
+    val downloading: Boolean = false,
+    val progress: Float = 0f
+)
+
+// ─── ViewModel ───────────────────────────────────────────────────────────────
+
+class MainViewModel(app: Application) : AndroidViewModel(app) {
+
+    private val settingsRepo = SettingsRepository(app)
+    private val dao          = AppDatabase.get(app).uploadedPhotoDao()
+    private val workManager  = WorkManager.getInstance(app)
+
+    val settings = settingsRepo.settings.stateIn(
+        viewModelScope, SharingStarted.WhileSubscribed(5_000), AppSettings()
+    )
+
+    private val _stats = MutableStateFlow(LibraryStats())
+    val stats = _stats.asStateFlow()
+
+    private val _recentUploads = MutableStateFlow<List<UploadedPhoto>>(emptyList())
+    val recentUploads = _recentUploads.asStateFlow()
+
+    private val _allBackedUpPhotos = MutableStateFlow<List<UploadedPhoto>>(emptyList())
+    val allBackedUpPhotos = _allBackedUpPhotos.asStateFlow()
+
+    private val _backupRuns = MutableStateFlow<List<BackupRun>>(emptyList())
+    val backupRuns = _backupRuns.asStateFlow()
+
+    private val _localFreeUris = MutableStateFlow<List<Uri>>(emptyList())
+    val localFreeUris = _localFreeUris.asStateFlow()
+
+    private val _connectionResult = MutableStateFlow<String?>(null)
+    val connectionResult = _connectionResult.asStateFlow()
+
+    private val _isTestingConnection = MutableStateFlow(false)
+    val isTestingConnection = _isTestingConnection.asStateFlow()
+
+    private val _restoreStatus = MutableStateFlow<String?>(null)
+    val restoreStatus = _restoreStatus.asStateFlow()
+
+    private val _verifyResult = MutableStateFlow(VerifyResult())
+    val verifyResult = _verifyResult.asStateFlow()
+
+    private val _updateState = MutableStateFlow(UpdateState())
+    val updateState = _updateState.asStateFlow()
+
+    // Duplicate groups: photos sharing the same contentHash
+    val duplicates: kotlinx.coroutines.flow.StateFlow<List<List<UploadedPhoto>>> =
+        _allBackedUpPhotos
+            .map { photos ->
+                photos.groupBy { it.contentHash }
+                      .values
+                      .filter { it.size > 1 }
+                      .toList()
+            }
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    val workStatus = workManager
+        .getWorkInfosForUniqueWorkFlow(BackupScheduler.UNIQUE_ONE_TIME)
+        .map { it.firstOrNull() }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    val status = workStatus
+        .map { it.toStatus() }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), BackupStatus())
+
+    init {
+        refreshStats()
+        viewModelScope.launch {
+            workStatus
+                .filter { it?.state == WorkInfo.State.SUCCEEDED }
+                .distinctUntilChanged()
+                .collect { refreshStats() }
+        }
+        // Auto-check for updates once settings are loaded
+        viewModelScope.launch {
+            settings.filter { it.updateUrl.isNotBlank() }.first()
+            checkForUpdates(manual = false)
+        }
+    }
+
+    // ── Stats ─────────────────────────────────────────────────────────────────
+
+    fun refreshStats(hasPermission: Boolean = true) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val app     = getApplication<Application>()
+            val backed  = dao.getAll()
+            val onDevice = if (hasPermission) MediaStoreScanner.queryAll(app).size else 0
+
+            val freeUris = mutableListOf<Uri>()
+            var freeBytes = 0L
+            backed.forEach { photo ->
+                val uri = photo.contentUri()
+                val exists = runCatching {
+                    app.contentResolver.query(uri,
+                        arrayOf(MediaStore.MediaColumns._ID), null, null, null)
+                        ?.use { it.count > 0 } ?: false
+                }.getOrDefault(false)
+                if (exists) { freeUris.add(uri); freeBytes += photo.sizeBytes }
+            }
+            _localFreeUris.value = freeUris
+
+            val runs = AppDatabase.get(app).backupRunDao().recent()
+            _recentUploads.value     = dao.recent()
+            _allBackedUpPhotos.value = backed
+            _backupRuns.value        = runs
+            _stats.value = LibraryStats(
+                totalOnDevice  = onDevice,
+                totalBackedUp  = backed.size,
+                backedUpBytes  = dao.totalBytes(),
+                lastBackupTime = runs.firstOrNull()?.finishedAt ?: 0L,
+                storageToFree  = freeBytes
+            )
+        }
+    }
+
+    // ── Settings ──────────────────────────────────────────────────────────────
+
+    fun save(
+        botToken: String, chatId: String,
+        wifiOnly: Boolean, autoBackup: Boolean,
+        includeVideos: Boolean,
+        maxFileSizeMb: Int = 50,
+        intervalHours: Int = 12,
+        requiresCharging: Boolean = false,
+        autoDeleteAfterBackup: Boolean = false,
+        themeMode: Int = 0,
+        includedAlbums: Set<String> = emptySet(),
+        updateUrl: String = ""
+    ) {
+        viewModelScope.launch {
+            settingsRepo.save(
+                botToken, chatId, wifiOnly, autoBackup, includeVideos,
+                maxFileSizeMb, intervalHours, requiresCharging,
+                autoDeleteAfterBackup, themeMode, includedAlbums, updateUrl
+            )
+            BackupScheduler.setPeriodic(getApplication(), autoBackup, wifiOnly,
+                intervalHours, requiresCharging)
+        }
+    }
+
+    // ── Backup control ────────────────────────────────────────────────────────
+
+    fun runBackup() {
+        val s = settings.value
+        if (!s.isConfigured)                                    { _connectionResult.value = "Set the bot token and channel ID first."; return }
+        if (!NetworkChecker.isConnected(getApplication()))      { _connectionResult.value = "No internet connection."; return }
+        if (s.wifiOnly && !NetworkChecker.isWifi(getApplication())) { _connectionResult.value = "Wi-Fi only mode is on — connect to Wi-Fi first."; return }
+        BackupScheduler.runNow(getApplication(), s.wifiOnly)
+    }
+
+    fun cancelBackup() = workManager.cancelUniqueWork(BackupScheduler.UNIQUE_ONE_TIME)
+
+    // ── Connection tests ──────────────────────────────────────────────────────
+
+    fun testConnection(botToken: String) {
+        if (botToken.isBlank()) { _connectionResult.value = "Enter a bot token first."; return }
+        viewModelScope.launch {
+            _isTestingConnection.value = true
+            _connectionResult.value   = "Checking token…"
+            val result = withContext(Dispatchers.IO) { TelegramClient(botToken).getMe() }
+            _connectionResult.value = result.fold(
+                onSuccess = { "Token OK — bot is @$it" },
+                onFailure = { "Token error: ${it.message}" }
+            )
+            _isTestingConnection.value = false
+        }
+    }
+
+    fun testChannel(botToken: String, chatId: String) {
+        if (botToken.isBlank() || chatId.isBlank()) {
+            _connectionResult.value = "Fill in both bot token and channel ID first."; return
+        }
+        viewModelScope.launch {
+            _isTestingConnection.value = true
+            _connectionResult.value   = "Sending test message…"
+            val result = withContext(Dispatchers.IO) {
+                TelegramClient(botToken).sendTestMessage(chatId)
+            }
+            _connectionResult.value = result.fold(
+                onSuccess = { "Channel OK — test message sent!" },
+                onFailure = { "Channel error: ${it.message}" }
+            )
+            _isTestingConnection.value = false
+        }
+    }
+
+    fun clearConnectionResult() { _connectionResult.value = null }
+
+    // ── Index backup ──────────────────────────────────────────────────────────
+
+    fun uploadIndex() {
+        viewModelScope.launch(Dispatchers.IO) {
+            _connectionResult.value = "Uploading index…"
+            val result = com.example.tgphotobackup.backup.IndexBackupManager.upload(getApplication())
+            _connectionResult.value = result.fold(
+                onSuccess = { "Index uploaded successfully." },
+                onFailure = { "Index upload failed: ${it.message}" }
+            )
+        }
+    }
+
+    // ── Restore from Telegram ─────────────────────────────────────────────────
+
+    fun restorePhoto(photo: UploadedPhoto) {
+        _restoreStatus.value = "Downloading…"
+        viewModelScope.launch(Dispatchers.IO) {
+            val s      = settingsRepo.settings.first()
+            val client = TelegramClient(s.botToken)
+
+            val pathResult = client.getFilePath(photo.fileId)
+            val filePath   = pathResult.getOrElse {
+                _restoreStatus.value = "Restore failed: ${it.message}"
+                return@launch
+            }
+            val dataResult = client.downloadBytes(filePath)
+            val data = dataResult.getOrElse {
+                _restoreStatus.value = if (it.message?.contains("20") == true)
+                    "File too large to restore via Bot API (>20 MB)"
+                else "Download failed: ${it.message}"
+                return@launch
+            }
+            val saved = saveToGallery(getApplication(), photo.displayName, photo.mimeType, data)
+            _restoreStatus.value = if (saved) "Saved '${photo.displayName}' to gallery ✓"
+                                   else "Failed to save to gallery"
+        }
+    }
+
+    fun clearRestoreStatus() { _restoreStatus.value = null }
+
+    // ── Free up space ─────────────────────────────────────────────────────────
+
+    fun deleteLocalCopies() {
+        viewModelScope.launch(Dispatchers.IO) {
+            var freed = 0L
+            _localFreeUris.value.forEach { uri ->
+                runCatching {
+                    val deleted = getApplication<Application>().contentResolver.delete(uri, null, null)
+                    if (deleted > 0) {
+                        val photo = _allBackedUpPhotos.value.find { it.contentUri() == uri }
+                        freed += photo?.sizeBytes ?: 0L
+                    }
+                }
+            }
+            _connectionResult.value = if (freed > 0)
+                "Freed ${formatBytes(freed)} of local storage"
+            else
+                "Nothing to remove (files may need system confirmation on this Android version)"
+            refreshStats()
+        }
+    }
+
+    fun batchDeleteLocal(hashes: Set<String>) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val app = getApplication<Application>()
+            val photos = _allBackedUpPhotos.value.filter { it.contentHash in hashes }
+            var freed = 0L
+            photos.forEach { photo ->
+                runCatching {
+                    val del = app.contentResolver.delete(photo.contentUri(), null, null)
+                    if (del > 0) freed += photo.sizeBytes
+                }
+            }
+            if (freed > 0) _connectionResult.value = "Freed ${formatBytes(freed)}"
+            refreshStats()
+        }
+    }
+
+    // ── Backup verification ───────────────────────────────────────────────────
+
+    fun verifyBackup() {
+        viewModelScope.launch(Dispatchers.IO) {
+            val s      = settingsRepo.settings.first()
+            val photos = dao.getAll()
+            if (photos.isEmpty()) { _connectionResult.value = "Nothing backed up yet."; return@launch }
+
+            _verifyResult.value = VerifyResult(running = true)
+            val client = TelegramClient(s.botToken)
+            var checked = 0; var broken = 0
+
+            photos.forEach { photo ->
+                val ok = client.fileExists(photo.fileId)
+                checked++
+                if (!ok) broken++
+                _verifyResult.value = VerifyResult(checked, broken, running = true)
+            }
+            _verifyResult.value = VerifyResult(checked, broken, running = false)
+            _connectionResult.value = if (broken == 0)
+                "All $checked files verified ✓"
+            else
+                "$broken/$checked files are missing from Telegram!"
+        }
+    }
+
+    // ── Self-update ───────────────────────────────────────────────────────────
+
+    fun checkForUpdates(manual: Boolean = true) {
+        val url = settings.value.updateUrl
+        if (url.isBlank()) {
+            if (manual) _connectionResult.value = "Enter an update URL in Settings → Updates first."
+            return
+        }
+        if (_updateState.value.checking || _updateState.value.downloading) return
+        viewModelScope.launch(Dispatchers.IO) {
+            _updateState.value = UpdateState(checking = true)
+            val app = getApplication<Application>()
+            val currentVersion = runCatching {
+                app.packageManager.getPackageInfo(app.packageName, 0).versionName ?: "0"
+            }.getOrDefault("0")
+
+            runCatching {
+                val client = okhttp3.OkHttpClient.Builder()
+                    .callTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
+                    .build()
+                val apiUrl = resolveApiUrl(url)
+                val response = client.newCall(
+                    okhttp3.Request.Builder().url(apiUrl)
+                        .header("Accept", "application/json")
+                        .header("User-Agent", "TGPhotoBackup/$currentVersion")
+                        .build()
+                ).execute()
+
+                if (response.code == 404) {
+                    _updateState.value = UpdateState()
+                    if (manual) _connectionResult.value =
+                        "No releases on GitHub yet. Create a release and upload the APK first."
+                    return@runCatching
+                }
+                if (!response.isSuccessful) {
+                    throw Exception("GitHub returned HTTP ${response.code}")
+                }
+
+                val body = response.body?.string() ?: throw Exception("Empty response")
+                val json = org.json.JSONObject(body)
+                val (remoteVersion, apkUrl) = if (isGithub(url)) {
+                    val tag   = json.getString("tag_name").trimStart('v')
+                    val assets = json.getJSONArray("assets")
+                    val apk   = (0 until assets.length())
+                        .map { assets.getJSONObject(it) }
+                        .firstOrNull { it.getString("name").endsWith(".apk") }
+                        ?: throw Exception("No APK asset found in this release")
+                    tag to apk.getString("browser_download_url")
+                } else {
+                    val ver = json.optString("versionName",
+                        json.optInt("versionCode", 0).toString())
+                    ver to json.getString("apkUrl")
+                }
+
+                if (isNewer(remoteVersion, currentVersion)) {
+                    _updateState.value = UpdateState(
+                        available = true, versionName = remoteVersion, apkUrl = apkUrl)
+                } else {
+                    _updateState.value = UpdateState()
+                    if (manual) _connectionResult.value =
+                        "Already on latest version (v$currentVersion)"
+                }
+            }.onFailure {
+                _updateState.value = UpdateState()
+                if (manual) _connectionResult.value = "Update check failed: ${it.message}"
+            }
+        }
+    }
+
+    fun downloadAndInstall(ctx: Context) {
+        val state = _updateState.value
+        if (!state.available || state.apkUrl.isBlank()) return
+        viewModelScope.launch(Dispatchers.IO) {
+            _updateState.value = state.copy(downloading = true, progress = 0f)
+            runCatching {
+                val client = okhttp3.OkHttpClient.Builder()
+                    .callTimeout(10, java.util.concurrent.TimeUnit.MINUTES)
+                    .build()
+                val response = client.newCall(
+                    okhttp3.Request.Builder().url(state.apkUrl).build()
+                ).execute()
+                val body      = response.body ?: throw Exception("Empty response")
+                val totalLen  = body.contentLength()
+                val updateDir = java.io.File(ctx.cacheDir, "updates").also { it.mkdirs() }
+                val apkFile   = java.io.File(updateDir, "update.apk")
+
+                apkFile.outputStream().use { out ->
+                    body.byteStream().use { input ->
+                        val buf = ByteArray(8192)
+                        var downloaded = 0L
+                        var n: Int
+                        while (input.read(buf).also { n = it } != -1) {
+                            out.write(buf, 0, n)
+                            downloaded += n
+                            if (totalLen > 0)
+                                _updateState.value = _updateState.value.copy(
+                                    progress = downloaded.toFloat() / totalLen)
+                        }
+                    }
+                }
+
+                val uri = androidx.core.content.FileProvider.getUriForFile(
+                    ctx, "${ctx.packageName}.provider", apkFile)
+                val intent = android.content.Intent(android.content.Intent.ACTION_VIEW).apply {
+                    setDataAndType(uri, "application/vnd.android.package-archive")
+                    addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                ctx.startActivity(intent)
+                _updateState.value = UpdateState()   // reset after install prompt shown
+            }.onFailure {
+                _updateState.value = state.copy(downloading = false, progress = 0f)
+                _connectionResult.value = "Download failed: ${it.message}"
+            }
+        }
+    }
+
+    fun dismissUpdate() { _updateState.value = UpdateState() }
+
+    private fun isGithub(url: String) = url.contains("github.com")
+
+    private fun resolveApiUrl(url: String): String {
+        if (!isGithub(url)) return url
+        val m = Regex("github\\.com/([^/]+)/([^/#?]+)").find(url) ?: return url
+        val (owner, repo) = m.destructured
+        return "https://api.github.com/repos/$owner/${repo.trimEnd('/')}/releases/latest"
+    }
+
+    private fun isNewer(remote: String, current: String): Boolean {
+        fun parts(v: String) = v.trimStart('v').split(".")
+            .mapNotNull { it.toIntOrNull() }
+        val r = parts(remote); val c = parts(current)
+        for (i in 0 until maxOf(r.size, c.size)) {
+            val diff = r.getOrElse(i) { 0 } - c.getOrElse(i) { 0 }
+            if (diff != 0) return diff > 0
+        }
+        return false
+    }
+
+    // ── Helpers ───────────────────────────────────────────────────────────────
+
+    private fun WorkInfo?.toStatus(): BackupStatus {
+        if (this == null) return BackupStatus()
+        val running  = state == WorkInfo.State.RUNNING || state == WorkInfo.State.ENQUEUED
+        val data     = if (state.isFinished) outputData else progress
+        val uploaded = outputData.getInt(BackupWorker.KEY_UPLOADED, 0)
+        val skipped  = outputData.getInt(BackupWorker.KEY_SKIPPED, 0)
+        val failed   = outputData.getInt(BackupWorker.KEY_FAILED, 0)
+        val firstErr = outputData.getString(BackupWorker.KEY_ERROR)
+        return BackupStatus(
+            running          = running,
+            done             = data.getInt(BackupWorker.KEY_DONE, 0),
+            total            = data.getInt(BackupWorker.KEY_TOTAL, 0),
+            currentName      = data.getString(BackupWorker.KEY_NAME).orEmpty(),
+            speedBytesPerSec = data.getLong(BackupWorker.KEY_SPEED, 0),
+            etaSeconds       = data.getLong(BackupWorker.KEY_ETA, 0),
+            lastResult = if (state == WorkInfo.State.SUCCEEDED) buildString {
+                append("$uploaded uploaded · $skipped skipped")
+                if (failed > 0) append(" · $failed failed")
+                if (firstErr != null) append("\nError: $firstErr")
+            } else null,
+            lastError = when {
+                state == WorkInfo.State.FAILED -> "Backup failed. Check token & channel ID."
+                state == WorkInfo.State.SUCCEEDED && failed > 0 && uploaded == 0 ->
+                    firstErr?.let { "All uploads failed: $it" }
+                        ?: "All files failed — is the bot admin in your channel?"
+                else -> null
+            }
+        )
+    }
+}
+
+// ─── Standalone helpers ───────────────────────────────────────────────────────
+
+private fun saveToGallery(ctx: Context, name: String, mime: String, data: ByteArray): Boolean {
+    val isVideo  = mime.startsWith("video/")
+    val collection = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        if (isVideo) MediaStore.Video.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+        else         MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+    } else {
+        if (isVideo) MediaStore.Video.Media.EXTERNAL_CONTENT_URI
+        else         MediaStore.Images.Media.EXTERNAL_CONTENT_URI
+    }
+    val values = ContentValues().apply {
+        put(MediaStore.MediaColumns.DISPLAY_NAME, name)
+        put(MediaStore.MediaColumns.MIME_TYPE, mime)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            put(MediaStore.MediaColumns.RELATIVE_PATH,
+                if (isVideo) "Movies/TGBackup" else "Pictures/TGBackup")
+            put(MediaStore.MediaColumns.IS_PENDING, 1)
+        }
+    }
+    val uri = ctx.contentResolver.insert(collection, values) ?: return false
+    return runCatching {
+        ctx.contentResolver.openOutputStream(uri)!!.use { it.write(data) }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val clear = ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 0) }
+            ctx.contentResolver.update(uri, clear, null, null)
+        }
+        true
+    }.getOrElse { ctx.contentResolver.delete(uri, null, null); false }
+}
+
+fun formatBytes(bytes: Long): String = when {
+    bytes < 1024            -> "$bytes B"
+    bytes < 1024 * 1024     -> "${"%.1f".format(bytes / 1024.0)} KB"
+    bytes < 1024L * 1024 * 1024 -> "${"%.1f".format(bytes / (1024.0 * 1024))} MB"
+    else                    -> "${"%.2f".format(bytes / (1024.0 * 1024 * 1024))} GB"
+}

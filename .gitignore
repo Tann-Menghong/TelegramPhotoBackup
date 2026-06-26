@@ -1,0 +1,15 @@
+*.iml
+.gradle/
+/local.properties
+/.idea/
+.DS_Store
+/build
+/captures
+.externalNativeBuild
+.cxx
+app/build/
+local.properties
+
+# Signing keys — keep backed up privately, never commit to public repos
+*.keystore
+*.jks
