@@ -46,6 +46,19 @@ class TelegramClient(private val token: String) {
         }
     } catch (e: Exception) { Result.failure(e) }
 
+    fun deleteMessage(chatId: String, messageId: Long): Result<Boolean> = try {
+        val body = okhttp3.FormBody.Builder()
+            .add("chat_id", chatId)
+            .add("message_id", messageId.toString())
+            .build()
+        val req = Request.Builder().url("$base/deleteMessage").post(body).build()
+        client.newCall(req).execute().use { resp ->
+            val json = JSONObject(resp.body?.string().orEmpty())
+            if (json.optBoolean("ok")) Result.success(true)
+            else Result.failure(IOException(json.optString("description", "deleteMessage failed")))
+        }
+    } catch (e: Exception) { Result.failure(e) }
+
     // ── Upload ───────────────────────────────────────────────────────────────
 
     fun sendDocument(

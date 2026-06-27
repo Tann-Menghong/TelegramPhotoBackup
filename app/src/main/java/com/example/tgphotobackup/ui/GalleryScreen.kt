@@ -27,17 +27,26 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CloudOff
+import androidx.compose.material.icons.filled.DeleteForever
 import androidx.compose.material.icons.filled.DeleteSweep
+import androidx.compose.material.icons.filled.DoneAll
 import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.RadioButtonUnchecked
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Sort
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -50,6 +59,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -60,6 +70,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -106,9 +117,10 @@ fun GalleryScreen(
     var selectedHashes by remember { mutableStateOf(setOf<String>()) }
     var sortMode       by remember { mutableStateOf(SortMode.DATE_DESC) }
     var typeFilter     by remember { mutableStateOf(TypeFilter.ALL) }
-    var showSortMenu   by remember { mutableStateOf(false) }
-    var selectedMonth  by remember { mutableStateOf<String?>(null) }
-    var showMonthMenu  by remember { mutableStateOf(false) }
+    var showSortMenu               by remember { mutableStateOf(false) }
+    var selectedMonth              by remember { mutableStateOf<String?>(null) }
+    var showMonthMenu              by remember { mutableStateOf(false) }
+    var showDeleteFromBackupDialog by remember { mutableStateOf(false) }
     val monthFmt       = remember { SimpleDateFormat("MMMM yyyy", Locale.getDefault()) }
     val context        = LocalContext.current
     val inSelectionMode = selectedHashes.isNotEmpty()
@@ -141,6 +153,35 @@ fun GalleryScreen(
             }
     }
 
+    // Delete from backup confirmation dialog
+    if (showDeleteFromBackupDialog) {
+        AlertDialog(
+            onDismissRequest = { showDeleteFromBackupDialog = false },
+            title = { Text("Delete from backup?") },
+            text = {
+                Text(
+                    "Remove ${selectedHashes.size} photo${if (selectedHashes.size != 1) "s" else ""} " +
+                    "from Telegram and the local index. This cannot be undone."
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        vm.deletePhotosFromBackup(selectedHashes)
+                        selectedHashes = emptySet()
+                        showDeleteFromBackupDialog = false
+                    },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.error
+                    )
+                ) { Text("Delete") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteFromBackupDialog = false }) { Text("Cancel") }
+            }
+        )
+    }
+
     Column(Modifier.fillMaxSize()) {
 
         // ── Selection action bar ───────────────────────────────
@@ -149,15 +190,24 @@ fun GalleryScreen(
                 modifier = Modifier.fillMaxWidth()) {
                 Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 4.dp),
                     verticalAlignment = Alignment.CenterVertically) {
+                    // [X] close
                     IconButton(onClick = { selectedHashes = emptySet() }) {
                         Icon(Icons.Default.Close, "Clear selection",
                             tint = MaterialTheme.colorScheme.onPrimaryContainer)
                     }
+                    // N selected label
                     Text("${selectedHashes.size} selected",
-                        modifier = Modifier.weight(1f),
                         style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.SemiBold,
                         color = MaterialTheme.colorScheme.onPrimaryContainer)
+                    // Select all
+                    IconButton(onClick = {
+                        selectedHashes = displayPhotos.map { it.contentHash }.toSet()
+                    }) {
+                        Icon(Icons.Default.DoneAll, "Select all",
+                            tint = MaterialTheme.colorScheme.onPrimaryContainer)
+                    }
+                    Spacer(Modifier.weight(1f))
                     // Share selected — downloads from Telegram if local files were deleted
                     IconButton(onClick = {
                         val photos = allPhotos.filter { it.contentHash in selectedHashes }
@@ -167,12 +217,17 @@ fun GalleryScreen(
                         Icon(Icons.Default.Share, "Share",
                             tint = MaterialTheme.colorScheme.onPrimaryContainer)
                     }
-                    // Delete local copies
+                    // Delete local copies only
                     IconButton(onClick = {
                         vm.batchDeleteLocal(selectedHashes)
                         selectedHashes = emptySet()
                     }) {
-                        Icon(Icons.Default.DeleteSweep, "Delete local",
+                        Icon(Icons.Default.PhoneAndroid, "Delete local copy",
+                            tint = MaterialTheme.colorScheme.error)
+                    }
+                    // Delete from backup (Telegram + DB)
+                    IconButton(onClick = { showDeleteFromBackupDialog = true }) {
+                        Icon(Icons.Default.DeleteForever, "Delete from backup",
                             tint = MaterialTheme.colorScheme.error)
                     }
                 }
@@ -191,7 +246,7 @@ fun GalleryScreen(
                     leadingIcon = { Icon(Icons.Default.Search, null, Modifier.size(18.dp),
                         tint = MaterialTheme.colorScheme.onSurfaceVariant) },
                     singleLine = true,
-                    shape = RoundedCornerShape(12.dp),
+                    shape = RoundedCornerShape(24.dp),
                     modifier = Modifier.weight(1f)
                 )
                 Box {
@@ -417,40 +472,44 @@ private fun AlbumList(photos: List<UploadedPhoto>, onAlbumSelected: (String) -> 
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         items(albums, key = { it.key }) { (name, group) ->
-            Row(
-                Modifier.fillMaxWidth()
-                    .clip(RoundedCornerShape(12.dp))
-                    .clickable { onAlbumSelected(name) }
-                    .padding(8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            Card(
+                shape = RoundedCornerShape(16.dp),
+                modifier = Modifier.fillMaxWidth().clickable { onAlbumSelected(name) },
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
             ) {
-                Box(
-                    Modifier.size(64.dp).clip(RoundedCornerShape(8.dp))
-                        .background(MaterialTheme.colorScheme.surfaceVariant)
+                Row(
+                    Modifier.fillMaxWidth().padding(12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    SubcomposeAsyncImage(
-                        model = group.first().contentUri(),
-                        contentDescription = null,
-                        modifier = Modifier.fillMaxSize(),
-                        contentScale = ContentScale.Crop,
-                        error = {
-                            Icon(Icons.Default.Folder, null,
-                                Modifier.align(Alignment.Center).size(32.dp),
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
-                    )
+                    Box(
+                        Modifier.size(72.dp).clip(RoundedCornerShape(12.dp))
+                            .background(MaterialTheme.colorScheme.surfaceVariant)
+                    ) {
+                        SubcomposeAsyncImage(
+                            model = group.first().contentUri(),
+                            contentDescription = null,
+                            modifier = Modifier.fillMaxSize(),
+                            contentScale = ContentScale.Crop,
+                            error = {
+                                Icon(Icons.Default.Folder, null,
+                                    Modifier.align(Alignment.Center).size(32.dp),
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        )
+                    }
+                    Column(Modifier.weight(1f)) {
+                        Text(name, style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold, maxLines = 1,
+                            overflow = TextOverflow.Ellipsis)
+                        Text("${group.size} items", style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    Icon(Icons.AutoMirrored.Filled.ArrowForward, null,
+                        modifier = Modifier.size(20.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-                Column(Modifier.weight(1f)) {
-                    Text(name, style = MaterialTheme.typography.bodyLarge,
-                        fontWeight = FontWeight.Medium, maxLines = 1,
-                        overflow = TextOverflow.Ellipsis)
-                    Text("${group.size} items", style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, null,
-                    modifier = Modifier.size(20.dp),
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
     }
@@ -480,6 +539,7 @@ private fun Thumbnail(
     }
     Box(
         Modifier.aspectRatio(1f)
+            .clip(RoundedCornerShape(4.dp))
             .combinedClickable(onClick = onClick, onLongClick = onLongClick)
     ) {
         SubcomposeAsyncImage(
@@ -564,20 +624,35 @@ private fun EmptyGallery() {
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Surface(shape = CircleShape, color = MaterialTheme.colorScheme.surfaceVariant,
-            modifier = Modifier.size(80.dp)) {
-            Box(contentAlignment = Alignment.Center) {
-                Icon(Icons.Default.CloudOff, null, Modifier.size(36.dp),
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
+        Box(
+            modifier = Modifier
+                .size(88.dp)
+                .clip(CircleShape)
+                .background(
+                    Brush.radialGradient(
+                        colors = listOf(
+                            MaterialTheme.colorScheme.primaryContainer,
+                            MaterialTheme.colorScheme.surfaceVariant
+                        )
+                    )
+                ),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(Icons.Default.CloudOff, null, Modifier.size(40.dp),
+                tint = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.75f))
         }
         Spacer(Modifier.height(24.dp))
-        Text("No photos backed up yet",
+        Text("No backups yet",
             style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
         Spacer(Modifier.height(8.dp))
         Text("Go to Home and tap Back up now\nto start your first backup.",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center)
+        Spacer(Modifier.height(4.dp))
+        Text("Your photos will be safely stored in Telegram.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
             textAlign = TextAlign.Center)
     }
 }

@@ -442,7 +442,7 @@ private fun HomeScreen(vm: MainViewModel) {
                             style = MaterialTheme.typography.titleSmall,
                             fontWeight = FontWeight.SemiBold,
                             color = MaterialTheme.colorScheme.onSecondaryContainer)
-                        Text("Share backed-up photos to any app · Works even after deleting local files",
+                        Text("Delete photos from backup in Gallery · Fix failed-upload notifications · Skip files >50 MB",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.8f))
                     }
@@ -722,6 +722,8 @@ private fun HomeScreen(vm: MainViewModel) {
             Spacer(Modifier.width(8.dp))
             Text("Back up now", style = MaterialTheme.typography.labelLarge)
         }
+
+        Spacer(Modifier.height(4.dp))
 
         // ── Free up space ──────────────────────────────────────
         if (stats.storageToFree > 0) {
@@ -1257,7 +1259,7 @@ private fun AlertBanner(
     contentColor: androidx.compose.ui.graphics.Color,
     actionLabel: String?, onAction: () -> Unit
 ) {
-    Surface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp), color = containerColor) {
+    Surface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(20.dp), color = containerColor) {
         Row(Modifier.padding(16.dp),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalAlignment = Alignment.Top) {

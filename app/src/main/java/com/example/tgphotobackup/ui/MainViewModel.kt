@@ -554,6 +554,24 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    fun deletePhotosFromBackup(hashes: Set<String>) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val s = settingsRepo.settings.first()
+            val app = getApplication<Application>()
+            val client = TelegramClient(s.botToken)
+            val photos = _allBackedUpPhotos.value.filter { it.contentHash in hashes }
+            var deleted = 0
+            photos.forEach { photo ->
+                if (s.chatId.isNotBlank()) runCatching { client.deleteMessage(s.chatId, photo.messageId) }
+                runCatching { dao.deleteByHash(photo.contentHash) }
+                runCatching { app.contentResolver.delete(photo.contentUri(), null, null) }
+                deleted++
+            }
+            _connectionResult.value = "Deleted $deleted photo${if (deleted != 1) "s" else ""} from backup"
+            refreshStats()
+        }
+    }
+
     // ── Backup verification ───────────────────────────────────────────────────
 
     fun verifyBackup() {
