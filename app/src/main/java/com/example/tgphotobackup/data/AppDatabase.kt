@@ -9,7 +9,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 
 @Database(
     entities = [UploadedPhoto::class, BackupRun::class, FailedUpload::class],
-    version = 6,
+    version = 7,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -42,6 +42,14 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        private val MIGRATION_6_7 = object : Migration(6, 7) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE uploaded_photos ADD COLUMN chunkGroup TEXT DEFAULT NULL")
+                db.execSQL("ALTER TABLE uploaded_photos ADD COLUMN chunkIndex INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE uploaded_photos ADD COLUMN totalChunks INTEGER NOT NULL DEFAULT 1")
+            }
+        }
+
         @Volatile private var INSTANCE: AppDatabase? = null
 
         fun get(context: Context): AppDatabase =
@@ -51,7 +59,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     DB_NAME
                 )
-                .addMigrations(MIGRATION_4_5, MIGRATION_5_6)
+                .addMigrations(MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7)
                 .build()
                 .also { INSTANCE = it }
             }

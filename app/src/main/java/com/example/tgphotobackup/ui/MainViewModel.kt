@@ -295,18 +295,39 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             val s      = settingsRepo.settings.first()
             val client = TelegramClient(s.botToken)
 
-            val pathResult = client.getFilePath(photo.fileId)
-            val filePath   = pathResult.getOrElse {
-                _restoreStatus.value = "Restore failed: ${it.message}"
-                return@launch
+            val data: ByteArray = if (photo.totalChunks > 1 && photo.chunkGroup != null) {
+                // Chunked file — download and concatenate all parts
+                val chunks = dao.findChunks(photo.chunkGroup).sortedBy { it.chunkIndex }
+                if (chunks.size < photo.totalChunks) {
+                    _restoreStatus.value = "Restore failed: some chunks are missing"
+                    return@launch
+                }
+                val buf = java.io.ByteArrayOutputStream()
+                for (chunk in chunks) {
+                    _restoreStatus.value = "Downloading part ${chunk.chunkIndex + 1}/${photo.totalChunks}…"
+                    val fp = client.getFilePath(chunk.fileId).getOrElse {
+                        _restoreStatus.value = "Restore failed: ${it.message}"
+                        return@launch
+                    }
+                    val bytes = client.downloadBytes(fp).getOrElse {
+                        _restoreStatus.value = "Download failed: ${it.message}"
+                        return@launch
+                    }
+                    buf.write(bytes)
+                }
+                buf.toByteArray()
+            } else {
+                // Single file
+                val filePath = client.getFilePath(photo.fileId).getOrElse {
+                    _restoreStatus.value = "Restore failed: ${it.message}"
+                    return@launch
+                }
+                client.downloadBytes(filePath).getOrElse {
+                    _restoreStatus.value = "Download failed: ${it.message}"
+                    return@launch
+                }
             }
-            val dataResult = client.downloadBytes(filePath)
-            val data = dataResult.getOrElse {
-                _restoreStatus.value = if (it.message?.contains("20") == true)
-                    "File too large to restore via Bot API (>20 MB)"
-                else "Download failed: ${it.message}"
-                return@launch
-            }
+
             val saved = saveToGallery(getApplication(), photo.displayName, photo.mimeType, data)
             _restoreStatus.value = if (saved) "Saved '${photo.displayName}' to gallery ✓"
                                    else "Failed to save to gallery"
@@ -463,13 +484,33 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         // File was deleted — download from Telegram into cache
         val s = settingsRepo.settings.first()
         if (s.botToken.isBlank()) return null
-        val client   = TelegramClient(s.botToken)
-        val filePath = client.getFilePath(photo.fileId).getOrElse { return null }
-        val data     = client.downloadBytes(filePath).getOrElse { return null }
+        val client = TelegramClient(s.botToken)
 
         val shareDir = java.io.File(context.cacheDir, "share").also { it.mkdirs() }
-        val file     = java.io.File(shareDir, photo.displayName)
-        file.writeBytes(data)
+        val file = java.io.File(shareDir, photo.displayName)
+
+        if (photo.totalChunks > 1 && photo.chunkGroup != null) {
+            // Chunked file — download each part and concatenate
+            val chunks = AppDatabase.get(context).uploadedPhotoDao()
+                .findChunks(photo.chunkGroup)
+                .sortedBy { it.chunkIndex }
+            if (chunks.size < photo.totalChunks) return null
+
+            file.outputStream().buffered().use { out ->
+                for (chunk in chunks) {
+                    _shareStatus.value = "Downloading part ${chunk.chunkIndex + 1}/${photo.totalChunks}…"
+                    val filePath = client.getFilePath(chunk.fileId).getOrElse { return null }
+                    val bytes    = client.downloadBytes(filePath).getOrElse { return null }
+                    out.write(bytes)
+                }
+            }
+        } else {
+            // Single file
+            val filePath = client.getFilePath(photo.fileId).getOrElse { return null }
+            val data     = client.downloadBytes(filePath).getOrElse { return null }
+            file.writeBytes(data)
+        }
+
         return androidx.core.content.FileProvider.getUriForFile(
             context, "${context.packageName}.provider", file
         )
