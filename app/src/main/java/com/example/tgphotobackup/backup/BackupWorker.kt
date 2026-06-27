@@ -61,7 +61,7 @@ class BackupWorker(
                 KEY_UPLOADED  to summary.uploaded,
                 KEY_SKIPPED   to summary.skipped,
                 KEY_FAILED    to summary.failed,
-                KEY_OVERSIZED to summary.total,
+                KEY_OVERSIZED to summary.oversized,
                 KEY_TOTAL     to summary.total,
                 KEY_ERROR     to summary.firstError
             ))

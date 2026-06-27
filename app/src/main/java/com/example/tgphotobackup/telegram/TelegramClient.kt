@@ -58,10 +58,18 @@ class TelegramClient(private val token: String) {
         stream: () -> InputStream
     ): SendResult {
         var lastException: Exception? = null
+        var nextDelayMs = 2_000L
         repeat(maxRetries) { attempt ->
-            if (attempt > 0) Thread.sleep(minOf(1000L * (1L shl attempt), 30_000L))
+            if (attempt > 0) Thread.sleep(nextDelayMs)
             try { return sendDocumentOnce(chatId, fileName, mime, length, caption, stream) }
-            catch (e: IOException) { lastException = e }
+            catch (e: IOException) {
+                lastException = e
+                // honour Telegram's retry_after if present in the error message
+                val retryAfterSec = Regex("retry after (\\d+)s").find(e.message ?: "")
+                    ?.groupValues?.get(1)?.toLongOrNull()
+                nextDelayMs = if (retryAfterSec != null) retryAfterSec * 1_000L
+                              else minOf(nextDelayMs * 2, 30_000L)
+            }
         }
         throw lastException ?: IOException("sendDocument failed after $maxRetries retries")
     }

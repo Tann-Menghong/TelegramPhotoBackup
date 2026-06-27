@@ -9,7 +9,6 @@ import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.first
 import java.io.InputStream
-import java.security.DigestInputStream
 import java.security.MessageDigest
 
 data class BackupSummary(
@@ -71,7 +70,19 @@ class BackupManager(private val context: Context) {
             if (photo.size > maxBytes) { oversized++; return@forEachIndexed }
 
             try {
-                val md = MessageDigest.getInstance("SHA-256")
+                // Compute hash before uploading so duplicates are caught without sending the file.
+                val hash = context.contentResolver.openInputStream(photo.uri)?.use { stream ->
+                    val md = MessageDigest.getInstance("SHA-256")
+                    val buf = ByteArray(65_536)
+                    var n = stream.read(buf)
+                    while (n >= 0) { md.update(buf, 0, n); n = stream.read(buf) }
+                    md.digest().joinToString("") { "%02x".format(it) }
+                } ?: throw IllegalStateException("Cannot open ${photo.uri}")
+
+                if (hash in sessionHashes || dao.findByHash(hash) != null) {
+                    skipped++; return@forEachIndexed
+                }
+
                 val res = client.sendDocument(
                     chatId   = settings.chatId,
                     fileName = photo.displayName,
@@ -79,14 +90,8 @@ class BackupManager(private val context: Context) {
                     length   = photo.size,
                     caption  = photo.displayName
                 ) {
-                    val base: InputStream = context.contentResolver.openInputStream(photo.uri)
+                    context.contentResolver.openInputStream(photo.uri)
                         ?: throw IllegalStateException("Cannot open ${photo.uri}")
-                    DigestInputStream(base, md)
-                }
-
-                val hash = md.digest().joinToString("") { "%02x".format(it) }
-                if (hash in sessionHashes || dao.findByHash(hash) != null) {
-                    skipped++; return@forEachIndexed
                 }
 
                 sessionHashes.add(hash)
