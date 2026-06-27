@@ -293,7 +293,8 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
                                         vm,
                                         onSettings = { showSettings = true },
                                         onStats = { selectedTab = 3 },
-                                        onHistory = { showHistory = true }
+                                        onHistory = { showHistory = true },
+                                        onAlbumClick = { selectedTab = 0 }
                                     )
                                     3 -> StatsScreen(vm)
                                     else -> GalleryScreen(vm) { idx -> selectedPhotoIndex = idx }
@@ -814,7 +815,8 @@ private fun LibraryTab(
     vm: MainViewModel,
     onSettings: () -> Unit,
     onStats: () -> Unit,
-    onHistory: () -> Unit
+    onHistory: () -> Unit,
+    onAlbumClick: (String) -> Unit = {}
 ) {
     val allPhotos by vm.allBackedUpPhotos.collectAsState()
     val albums = remember(allPhotos) {
@@ -841,7 +843,8 @@ private fun LibraryTab(
                             name = entry.key.ifBlank { "Unknown" },
                             count = entry.value.size,
                             coverPhoto = entry.value.firstOrNull(),
-                            modifier = Modifier.weight(1f)
+                            modifier = Modifier.weight(1f),
+                            onClick = { onAlbumClick(entry.key) }
                         )
                     }
                     if (row.size == 1) Spacer(Modifier.weight(1f))
@@ -857,7 +860,7 @@ private fun LibraryTab(
                 supportingContent = { Text("Storage usage, upload trends") },
                 leadingContent = { Icon(Icons.Default.BarChart, null,
                     tint = MaterialTheme.colorScheme.primary) },
-                modifier = Modifier.clickable(onClick = onStats)
+                modifier = Modifier.clickable { onStats() }
             )
         }
         item {
@@ -866,7 +869,7 @@ private fun LibraryTab(
                 supportingContent = { Text("Previous backup runs") },
                 leadingContent = { Icon(Icons.Default.History, null,
                     tint = MaterialTheme.colorScheme.primary) },
-                modifier = Modifier.clickable(onClick = onHistory)
+                modifier = Modifier.clickable { onHistory() }
             )
         }
         item {
@@ -875,7 +878,7 @@ private fun LibraryTab(
                 supportingContent = { Text("Bot token, schedule, storage") },
                 leadingContent = { Icon(Icons.Default.Settings, null,
                     tint = MaterialTheme.colorScheme.primary) },
-                modifier = Modifier.clickable(onClick = onSettings)
+                modifier = Modifier.clickable { onSettings() }
             )
         }
     }
@@ -886,9 +889,10 @@ private fun AlbumCard(
     name: String,
     count: Int,
     coverPhoto: UploadedPhoto?,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit = {}
 ) {
-    Column(modifier.padding(bottom = 8.dp)) {
+    Column(modifier.clickable { onClick() }.padding(bottom = 8.dp)) {
         Box(Modifier.fillMaxWidth().aspectRatio(1f).clip(RoundedCornerShape(12.dp))
             .background(MaterialTheme.colorScheme.surfaceVariant)) {
             coverPhoto?.let {
