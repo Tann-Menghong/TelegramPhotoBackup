@@ -1,8 +1,9 @@
-package com.example.tgphotobackup.ui
+﻿package com.example.tgphotobackup.ui
 
+import android.content.Intent
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -16,20 +17,27 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.Sort
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CloudOff
 import androidx.compose.material.icons.filled.DeleteSweep
+import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.RadioButtonUnchecked
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.Sort
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -37,17 +45,21 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Tab
+import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -65,7 +77,6 @@ import com.example.tgphotobackup.data.UploadedPhoto
 import com.example.tgphotobackup.data.contentUri
 import com.example.tgphotobackup.data.isVideo
 import java.text.SimpleDateFormat
-import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 
@@ -89,6 +100,9 @@ fun GalleryScreen(
     val allPhotos by vm.allBackedUpPhotos.collectAsState()
     if (allPhotos.isEmpty()) { EmptyGallery(); return }
 
+    var selectedTab    by remember { mutableIntStateOf(0) }
+    var searchQuery    by remember { mutableStateOf("") }
+    var selectedAlbum  by remember { mutableStateOf<String?>(null) }
     var selectedHashes by remember { mutableStateOf(setOf<String>()) }
     var sortMode       by remember { mutableStateOf(SortMode.DATE_DESC) }
     var typeFilter     by remember { mutableStateOf(TypeFilter.ALL) }
@@ -164,12 +178,46 @@ fun GalleryScreen(
                 }
             }
         } else {
-            // ── Filter row (type chips + month + sort) ─────────
+            // ── Search + sort button ───────────────────────────
             Row(
-                Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically
+                Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 8.dp, bottom = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
             ) {
+                OutlinedTextField(
+                    value = searchQuery,
+                    onValueChange = { searchQuery = it; selectedAlbum = null },
+                    placeholder = { Text("Search photos…") },
+                    leadingIcon = { Icon(Icons.Default.Search, null, Modifier.size(18.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant) },
+                    singleLine = true,
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.weight(1f)
+                )
+                Box {
+                    IconButton(onClick = { showSortMenu = true }) {
+                        Icon(Icons.Default.Sort, "Sort",
+                            tint = if (sortMode != SortMode.DATE_DESC)
+                                MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    DropdownMenu(showSortMenu, { showSortMenu = false }) {
+                        SortMode.entries.forEach { mode ->
+                            DropdownMenuItem(
+                                text = { Text(mode.label) },
+                                onClick = { sortMode = mode; showSortMenu = false },
+                                leadingIcon = if (sortMode == mode) {
+                                    { Icon(Icons.Default.Check, null, Modifier.size(16.dp)) }
+                                } else null
+                            )
+                        }
+                    }
+                }
+            }
+
+            // ── Type filter chips ──────────────────────────────
+            Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 6.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 TypeFilter.entries.forEach { filter ->
                     FilterChip(
                         selected = typeFilter == filter,
@@ -197,37 +245,109 @@ fun GalleryScreen(
                         }
                     }
                 }
-                Spacer(Modifier.weight(1f))
-                Box {
-                    IconButton(onClick = { showSortMenu = true }, modifier = Modifier.size(32.dp)) {
-                        Icon(Icons.AutoMirrored.Filled.Sort, "Sort", Modifier.size(20.dp),
-                            tint = if (sortMode != SortMode.DATE_DESC)
-                                MaterialTheme.colorScheme.primary
-                            else MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                    DropdownMenu(showSortMenu, { showSortMenu = false }) {
-                        SortMode.entries.forEach { mode ->
-                            DropdownMenuItem(
-                                text = { Text(mode.label) },
-                                onClick = { sortMode = mode; showSortMenu = false },
-                                leadingIcon = if (sortMode == mode) {
-                                    { Icon(Icons.Default.Check, null, Modifier.size(16.dp)) }
-                                } else null
-                            )
-                        }
-                    }
+            }
+
+            // ── Tabs ───────────────────────────────────────────
+            if (searchQuery.isBlank()) {
+                TabRow(selectedTabIndex = selectedTab) {
+                    Tab(selected = selectedTab == 0,
+                        onClick = { selectedTab = 0; selectedAlbum = null },
+                        text = { Text("All") })
+                    Tab(selected = selectedTab == 1,
+                        onClick = { selectedTab = 1; searchQuery = "" },
+                        text = { Text("Albums") })
                 }
             }
         }
 
-        // ── Date-grouped grid ──────────────────────────────────
-        DateGroupedGrid(
-            displayPhotos = displayPhotos,
-            allPhotos = allPhotos,
-            selectedHashes = selectedHashes,
-            onPhotoClick = onPhotoClick,
-            onSelectionChange = { selectedHashes = it }
-        )
+        // ── Content ────────────────────────────────────────────
+        when {
+            searchQuery.isNotBlank() -> {
+                val filtered = displayPhotos.filter {
+                    it.displayName.contains(searchQuery, ignoreCase = true)
+                }
+                SelectableGrid(filtered, displayPhotos, selectedHashes, onPhotoClick) {
+                    selectedHashes = it
+                }
+            }
+            selectedTab == 1 && selectedAlbum == null -> {
+                AlbumList(displayPhotos) { selectedAlbum = it }
+            }
+            selectedTab == 1 && selectedAlbum != null -> {
+                val albumPhotos = displayPhotos.filter {
+                    it.bucketName.ifBlank { "Other" } == selectedAlbum
+                }
+                Column {
+                    Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically) {
+                        IconButton(onClick = { selectedAlbum = null }) {
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back to albums")
+                        }
+                        Text(selectedAlbum ?: "",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold)
+                        Spacer(Modifier.weight(1f))
+                        Text("${albumPhotos.size} files",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(end = 16.dp))
+                    }
+                    SelectableGrid(albumPhotos, displayPhotos, selectedHashes, onPhotoClick) {
+                        selectedHashes = it
+                    }
+                }
+            }
+            else -> {
+                DateGroupedGrid(displayPhotos, selectedHashes, onPhotoClick) { selectedHashes = it }
+            }
+        }
+    }
+}
+
+// ─── Selectable flat grid ─────────────────────────────────────────────────────
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun SelectableGrid(
+    photos: List<UploadedPhoto>,
+    allPhotos: List<UploadedPhoto>,
+    selectedHashes: Set<String>,
+    onPhotoClick: (index: Int) -> Unit,
+    onSelectionChange: (Set<String>) -> Unit
+) {
+    val inSelectionMode = selectedHashes.isNotEmpty()
+    if (photos.isEmpty()) {
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Text("No photos found", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        return
+    }
+    LazyVerticalGrid(
+        columns = GridCells.Fixed(3),
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(bottom = 16.dp),
+        horizontalArrangement = Arrangement.spacedBy(2.dp),
+        verticalArrangement   = Arrangement.spacedBy(2.dp)
+    ) {
+        items(photos, key = { it.contentHash }) { photo ->
+            val isSelected = photo.contentHash in selectedHashes
+            Thumbnail(
+                photo = photo,
+                isSelected = isSelected,
+                inSelectionMode = inSelectionMode,
+                onClick = {
+                    if (inSelectionMode) {
+                        onSelectionChange(
+                            if (isSelected) selectedHashes - photo.contentHash
+                            else selectedHashes + photo.contentHash
+                        )
+                    } else {
+                        onPhotoClick(allPhotos.indexOf(photo).coerceAtLeast(0))
+                    }
+                },
+                onLongClick = { onSelectionChange(selectedHashes + photo.contentHash) }
+            )
+        }
     }
 }
 
@@ -236,66 +356,107 @@ fun GalleryScreen(
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun DateGroupedGrid(
-    displayPhotos: List<UploadedPhoto>,
-    allPhotos: List<UploadedPhoto>,
+    photos: List<UploadedPhoto>,
     selectedHashes: Set<String>,
-    onPhotoClick: (index: Int) -> Unit,
+    onClick: (index: Int) -> Unit,
     onSelectionChange: (Set<String>) -> Unit
 ) {
     val inSelectionMode = selectedHashes.isNotEmpty()
-    if (displayPhotos.isEmpty()) {
-        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Text("No photos found", color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-        return
+    val monthFmt = remember { SimpleDateFormat("MMMM yyyy", Locale.getDefault()) }
+    val grouped  = remember(photos) {
+        photos.groupBy { monthFmt.format(Date(it.uploadedAt)) }
     }
 
     LazyVerticalGrid(
         columns = GridCells.Fixed(3),
-        contentPadding = PaddingValues(bottom = 8.dp),
-        verticalArrangement = Arrangement.spacedBy(2.dp),
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(bottom = 16.dp),
         horizontalArrangement = Arrangement.spacedBy(2.dp),
-        modifier = Modifier.fillMaxSize()
+        verticalArrangement   = Arrangement.spacedBy(2.dp)
     ) {
-        val grouped = groupPhotosByDate(displayPhotos)
-        grouped.forEach { entry ->
-            when (entry) {
-                is String -> item(span = { GridItemSpan(maxLineSpan) }) {
-                    Text(
-                        entry,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 4.dp),
-                        style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-                }
-                is UploadedPhoto -> item(key = entry.contentHash) {
-                    val isSelected = entry.contentHash in selectedHashes
-                    Thumbnail(
-                        photo = entry,
-                        isSelected = isSelected,
-                        inSelectionMode = inSelectionMode,
-                        onClick = {
-                            if (inSelectionMode) {
-                                onSelectionChange(
-                                    if (isSelected) selectedHashes - entry.contentHash
-                                    else selectedHashes + entry.contentHash
-                                )
-                            } else {
-                                onPhotoClick(allPhotos.indexOf(entry).coerceAtLeast(0))
-                            }
-                        },
-                        onLongClick = { onSelectionChange(selectedHashes + entry.contentHash) }
-                    )
-                }
+        grouped.forEach { (month, group) ->
+            item(span = { GridItemSpan(3) }) {
+                Text(month, style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.padding(start = 16.dp, top = 16.dp, bottom = 4.dp))
+            }
+            items(group, key = { it.contentHash }) { photo ->
+                val isSelected = photo.contentHash in selectedHashes
+                Thumbnail(
+                    photo = photo,
+                    isSelected = isSelected,
+                    inSelectionMode = inSelectionMode,
+                    onClick = {
+                        if (inSelectionMode) {
+                            onSelectionChange(
+                                if (isSelected) selectedHashes - photo.contentHash
+                                else selectedHashes + photo.contentHash
+                            )
+                        } else {
+                            onClick(photos.indexOf(photo).coerceAtLeast(0))
+                        }
+                    },
+                    onLongClick = { onSelectionChange(selectedHashes + photo.contentHash) }
+                )
             }
         }
     }
 }
 
-// ─── Thumbnail — Google Photos style ─────────────────────────────────────────
+// ─── Album list ───────────────────────────────────────────────────────────────
+
+@Composable
+private fun AlbumList(photos: List<UploadedPhoto>, onAlbumSelected: (String) -> Unit) {
+    val albums = remember(photos) {
+        photos.groupBy { it.bucketName.ifBlank { "Other" } }
+              .entries.sortedBy { it.key }
+    }
+    LazyColumn(
+        Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(16.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        items(albums, key = { it.key }) { (name, group) ->
+            Row(
+                Modifier.fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .clickable { onAlbumSelected(name) }
+                    .padding(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Box(
+                    Modifier.size(64.dp).clip(RoundedCornerShape(8.dp))
+                        .background(MaterialTheme.colorScheme.surfaceVariant)
+                ) {
+                    SubcomposeAsyncImage(
+                        model = group.first().contentUri(),
+                        contentDescription = null,
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Crop,
+                        error = {
+                            Icon(Icons.Default.Folder, null,
+                                Modifier.align(Alignment.Center).size(32.dp),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    )
+                }
+                Column(Modifier.weight(1f)) {
+                    Text(name, style = MaterialTheme.typography.bodyLarge,
+                        fontWeight = FontWeight.Medium, maxLines = 1,
+                        overflow = TextOverflow.Ellipsis)
+                    Text("${group.size} items", style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, null,
+                    modifier = Modifier.size(20.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+    }
+}
+
+// ─── Thumbnail with selection overlay ────────────────────────────────────────
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -313,11 +474,12 @@ private fun Thumbnail(
                 .data(photo.contentUri())
                 .decoderFactory(VideoFrameDecoder.Factory())
                 .build()
-        } else photo.contentUri()
+        } else {
+            photo.contentUri()
+        }
     }
     Box(
-        Modifier
-            .aspectRatio(1f)
+        Modifier.aspectRatio(1f)
             .combinedClickable(onClick = onClick, onLongClick = onLongClick)
     ) {
         SubcomposeAsyncImage(
@@ -325,71 +487,69 @@ private fun Thumbnail(
             contentDescription = photo.displayName,
             modifier = Modifier.fillMaxSize(),
             contentScale = ContentScale.Crop,
-            loading = {
-                Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surfaceVariant))
-            },
             error = {
                 val thumbFile = ThumbnailCache.file(LocalContext.current, photo.contentHash)
                 if (thumbFile.exists()) {
-                    AsyncImage(model = thumbFile, contentDescription = null,
-                        modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                    AsyncImage(
+                        model = thumbFile,
+                        contentDescription = photo.displayName,
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Crop
+                    )
                 } else {
-                    Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surfaceVariant),
-                        contentAlignment = Alignment.Center) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally,
-                            modifier = Modifier.padding(4.dp)) {
+                    Box(
+                        Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surfaceVariant),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            modifier = Modifier.padding(4.dp)
+                        ) {
                             Icon(Icons.Default.CloudOff, null, Modifier.size(20.dp),
                                 tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f))
-                            Text(photo.displayName, fontSize = 7.sp,
+                            Text(
+                                photo.displayName,
+                                fontSize = 7.sp,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
-                                maxLines = 2, overflow = TextOverflow.Ellipsis,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis,
                                 textAlign = TextAlign.Center,
-                                modifier = Modifier.padding(top = 2.dp))
+                                style = MaterialTheme.typography.labelSmall,
+                                modifier = Modifier.padding(top = 2.dp)
+                            )
                         }
                     }
                 }
             }
         )
 
-        // Gradient scrim at top for selection circle visibility
-        if (inSelectionMode) {
-            Box(Modifier.fillMaxWidth().height(48.dp).align(Alignment.TopStart)
-                .background(Brush.verticalGradient(
-                    listOf(Color.Black.copy(alpha = 0.3f), Color.Transparent))))
-        }
-
-        // Selection indicator — top-left (Google Photos style)
-        Box(Modifier.align(Alignment.TopStart).padding(6.dp)) {
-            if (inSelectionMode) {
-                if (isSelected) {
-                    Icon(Icons.Default.CheckCircle, null, Modifier.size(22.dp),
-                        tint = MaterialTheme.colorScheme.primary)
-                } else {
-                    Box(Modifier.size(22.dp).border(2.dp, Color.White, CircleShape))
-                }
-            }
-        }
-
-        // Selected overlay tint
+        // Selection overlay
         if (isSelected) {
-            Box(Modifier.fillMaxSize().background(
-                MaterialTheme.colorScheme.primary.copy(alpha = 0.25f)))
+            Box(Modifier.fillMaxSize()
+                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.35f)))
+            Icon(Icons.Default.CheckCircle, null,
+                modifier = Modifier.align(Alignment.TopEnd).padding(4.dp).size(20.dp),
+                tint = MaterialTheme.colorScheme.primary)
+        } else if (inSelectionMode) {
+            Icon(Icons.Default.RadioButtonUnchecked, null,
+                modifier = Modifier.align(Alignment.TopEnd).padding(4.dp).size(20.dp),
+                tint = Color.White.copy(alpha = 0.8f))
         }
 
-        // Video play icon — bottom right
+        // Video badge
         if (photo.isVideo()) {
-            Icon(Icons.Default.PlayArrow, null,
-                modifier = Modifier.align(Alignment.BottomEnd).padding(4.dp).size(18.dp),
-                tint = Color.White)
-        }
-
-        // Multi-part badge — bottom left
-        if (photo.totalChunks > 1) {
-            Box(Modifier.align(Alignment.BottomStart).padding(4.dp)
-                .background(Color.Black.copy(alpha = 0.5f), RoundedCornerShape(3.dp))
-                .padding(horizontal = 3.dp, vertical = 1.dp)) {
-                Text("${photo.totalChunks}pt", fontSize = 7.sp, color = Color.White,
-                    style = MaterialTheme.typography.labelSmall)
+            Box(
+                Modifier.align(Alignment.BottomStart).padding(4.dp)
+                    .clip(RoundedCornerShape(4.dp))
+                    .background(Color.Black.copy(alpha = 0.55f))
+                    .padding(horizontal = 4.dp, vertical = 2.dp)
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Icon(Icons.Default.PlayArrow, null, Modifier.size(10.dp), tint = Color.White)
+                    Text("VID", fontSize = 8.sp, color = Color.White,
+                        style = MaterialTheme.typography.labelSmall)
+                }
             }
         }
     }
@@ -415,40 +575,9 @@ private fun EmptyGallery() {
         Text("No photos backed up yet",
             style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
         Spacer(Modifier.height(8.dp))
-        Text("Go to Backup and tap Back up now\nto start your first backup.",
+        Text("Go to Home and tap Back up now\nto start your first backup.",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center)
     }
-}
-
-// ─── Date grouping ────────────────────────────────────────────────────────────
-
-private fun groupPhotosByDate(photos: List<UploadedPhoto>): List<Any> {
-    val cal = Calendar.getInstance()
-    val todayStart = cal.apply {
-        set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0)
-        set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
-    }.timeInMillis
-    val yesterdayStart = todayStart - 86_400_000L
-    val thisYear = Calendar.getInstance().get(Calendar.YEAR)
-
-    val result = mutableListOf<Any>()
-    var lastLabel = ""
-    photos.forEach { photo ->
-        val label = when {
-            photo.uploadedAt >= todayStart    -> "Today"
-            photo.uploadedAt >= yesterdayStart -> "Yesterday"
-            else -> {
-                val c = Calendar.getInstance().apply { timeInMillis = photo.uploadedAt }
-                val d = c.get(Calendar.DAY_OF_MONTH)
-                val m = c.getDisplayName(Calendar.MONTH, Calendar.SHORT, Locale.getDefault()) ?: ""
-                val y = c.get(Calendar.YEAR)
-                if (y == thisYear) "$d $m" else "$d $m $y"
-            }
-        }
-        if (label != lastLabel) { result.add(label); lastLabel = label }
-        result.add(photo)
-    }
-    return result
 }
