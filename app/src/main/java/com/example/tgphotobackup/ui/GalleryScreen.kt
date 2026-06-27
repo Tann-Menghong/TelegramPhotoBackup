@@ -143,16 +143,10 @@ fun GalleryScreen(
                         style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.SemiBold,
                         color = MaterialTheme.colorScheme.onPrimaryContainer)
-                    // Share selected
+                    // Share selected — downloads from Telegram if local files were deleted
                     IconButton(onClick = {
-                        val uris = allPhotos.filter { it.contentHash in selectedHashes }
-                            .map { it.contentUri() }
-                        val intent = Intent(Intent.ACTION_SEND_MULTIPLE).apply {
-                            type = "*/*"
-                            putParcelableArrayListExtra(Intent.EXTRA_STREAM, ArrayList(uris))
-                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                        }
-                        context.startActivity(Intent.createChooser(intent, "Share ${uris.size} files"))
+                        val photos = allPhotos.filter { it.contentHash in selectedHashes }
+                        vm.sharePhotos(photos, context)
                         selectedHashes = emptySet()
                     }) {
                         Icon(Icons.Default.Share, "Share",
@@ -452,8 +446,23 @@ private fun Thumbnail(
                     Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surfaceVariant),
                     contentAlignment = Alignment.Center
                 ) {
-                    Icon(Icons.Default.CloudOff, null, Modifier.size(28.dp),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f))
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        modifier = Modifier.padding(4.dp)
+                    ) {
+                        Icon(Icons.Default.CloudOff, null, Modifier.size(20.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f))
+                        Text(
+                            photo.displayName,
+                            fontSize = 7.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                            textAlign = TextAlign.Center,
+                            style = MaterialTheme.typography.labelSmall,
+                            modifier = Modifier.padding(top = 2.dp)
+                        )
+                    }
                 }
             }
         )

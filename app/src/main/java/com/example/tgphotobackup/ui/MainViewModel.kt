@@ -111,6 +111,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val _updateState = MutableStateFlow(UpdateState())
     val updateState = _updateState.asStateFlow()
 
+    private val _shareStatus = MutableStateFlow<String?>(null)
+    val shareStatus = _shareStatus.asStateFlow()
+
     // Duplicate groups: photos sharing the same contentHash
     val duplicates: kotlinx.coroutines.flow.StateFlow<List<List<UploadedPhoto>>> =
         _allBackedUpPhotos
@@ -294,6 +297,79 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun clearRestoreStatus() { _restoreStatus.value = null }
+
+    // ── Share (works even when local file is deleted) ──────────────────────────
+
+    fun sharePhoto(photo: UploadedPhoto, context: android.content.Context) {
+        viewModelScope.launch(Dispatchers.IO) {
+            _shareStatus.value = "Preparing…"
+            val uri = downloadToShareCache(context, photo)
+            if (uri != null) {
+                val intent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                    type = photo.mimeType
+                    putExtra(android.content.Intent.EXTRA_STREAM, uri)
+                    addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                context.startActivity(android.content.Intent.createChooser(intent, "Share"))
+                _shareStatus.value = null
+            } else {
+                _shareStatus.value = "Download failed — check bot token & connection"
+            }
+        }
+    }
+
+    fun sharePhotos(photos: List<UploadedPhoto>, context: android.content.Context) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val uris = arrayListOf<Uri>()
+            photos.forEachIndexed { i, photo ->
+                _shareStatus.value = "Downloading ${i + 1}/${photos.size}…"
+                downloadToShareCache(context, photo)?.let { uris.add(it) }
+            }
+            if (uris.isNotEmpty()) {
+                val intent = android.content.Intent(android.content.Intent.ACTION_SEND_MULTIPLE).apply {
+                    type = "*/*"
+                    putParcelableArrayListExtra(android.content.Intent.EXTRA_STREAM, uris)
+                    addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                context.startActivity(android.content.Intent.createChooser(intent, "Share ${uris.size} files"))
+                _shareStatus.value = null
+            } else {
+                _shareStatus.value = "Download failed — check bot token & connection"
+            }
+        }
+    }
+
+    fun clearShareStatus() { _shareStatus.value = null }
+
+    private suspend fun downloadToShareCache(
+        context: android.content.Context,
+        photo: UploadedPhoto
+    ): Uri? {
+        // Use the on-device file directly if it still exists
+        val localUri = photo.contentUri()
+        val localExists = runCatching {
+            context.contentResolver.query(
+                localUri, arrayOf(MediaStore.MediaColumns._ID), null, null, null
+            )?.use { it.count > 0 } ?: false
+        }.getOrDefault(false)
+        if (localExists) return localUri
+
+        // File was deleted — download from Telegram into cache
+        val s = settingsRepo.settings.first()
+        if (s.botToken.isBlank()) return null
+        val client   = TelegramClient(s.botToken)
+        val filePath = client.getFilePath(photo.fileId).getOrElse { return null }
+        val data     = client.downloadBytes(filePath).getOrElse { return null }
+
+        val shareDir = java.io.File(context.cacheDir, "share").also { it.mkdirs() }
+        val file     = java.io.File(shareDir, photo.displayName)
+        file.writeBytes(data)
+        return androidx.core.content.FileProvider.getUriForFile(
+            context, "${context.packageName}.provider", file
+        )
+    }
 
     // ── Free up space ─────────────────────────────────────────────────────────
 

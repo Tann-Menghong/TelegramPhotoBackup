@@ -412,7 +412,7 @@ private fun HomeScreen(vm: MainViewModel) {
                             style = MaterialTheme.typography.titleSmall,
                             fontWeight = FontWeight.SemiBold,
                             color = MaterialTheme.colorScheme.onSecondaryContainer)
-                        Text("Smooth animations · Redesigned UI · Light mode fix",
+                        Text("Share backed-up photos to any app · Works even after deleting local files",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.8f))
                     }

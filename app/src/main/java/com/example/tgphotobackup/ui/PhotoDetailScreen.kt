@@ -19,6 +19,7 @@ import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.CloudOff
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.PlayCircle
@@ -44,9 +45,11 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
+import coil.compose.SubcomposeAsyncImage
 import com.example.tgphotobackup.data.UploadedPhoto
 import com.example.tgphotobackup.data.contentUri
 import com.example.tgphotobackup.data.isVideo
@@ -67,10 +70,14 @@ fun PhotoDetailScreen(
     var offsetX       by remember { mutableFloatStateOf(0f) }
     var offsetY       by remember { mutableFloatStateOf(0f) }
     val restoreStatus by vm.restoreStatus.collectAsState()
+    val shareStatus   by vm.shareStatus.collectAsState()
     val currentPhoto  = photos.getOrNull(pagerState.currentPage) ?: return
     val context       = LocalContext.current
 
-    LaunchedEffect(pagerState.currentPage) { scale = 1f; offsetX = 0f; offsetY = 0f }
+    LaunchedEffect(pagerState.currentPage) {
+        scale = 1f; offsetX = 0f; offsetY = 0f
+        vm.clearShareStatus()
+    }
 
     Box(Modifier.fillMaxSize().background(Color.Black)) {
 
@@ -80,7 +87,7 @@ fun PhotoDetailScreen(
             userScrollEnabled = scale <= 1.05f,
             modifier = Modifier.fillMaxSize()
         ) { page ->
-            AsyncImage(
+            SubcomposeAsyncImage(
                 model = photos[page].contentUri(),
                 contentDescription = photos[page].displayName,
                 modifier = Modifier
@@ -96,7 +103,27 @@ fun PhotoDetailScreen(
                         scaleX = scale, scaleY = scale,
                         translationX = offsetX, translationY = offsetY
                     ),
-                contentScale = ContentScale.Fit
+                contentScale = ContentScale.Fit,
+                error = {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(12.dp),
+                            modifier = Modifier.padding(40.dp)
+                        ) {
+                            Icon(Icons.Default.CloudOff, null, Modifier.size(64.dp),
+                                tint = Color.White.copy(alpha = 0.25f))
+                            Text("Deleted from device",
+                                color = Color.White.copy(alpha = 0.6f),
+                                style = MaterialTheme.typography.bodyLarge,
+                                textAlign = TextAlign.Center)
+                            Text("Tap  🔗  Share to send directly\nor  ↓  Download to save back to gallery",
+                                color = Color.White.copy(alpha = 0.38f),
+                                style = MaterialTheme.typography.bodySmall,
+                                textAlign = TextAlign.Center)
+                        }
+                    }
+                }
             )
         }
 
@@ -111,6 +138,7 @@ fun PhotoDetailScreen(
         ) {
             IconButton(onClick = {
                 vm.clearRestoreStatus()
+                vm.clearShareStatus()
                 scale = 1f; offsetX = 0f; offsetY = 0f
                 onBack()
             }) {
@@ -151,18 +179,21 @@ fun PhotoDetailScreen(
                 }
             }
 
-            // Share button
-            IconButton(onClick = {
-                val shareIntent = Intent.createChooser(
-                    Intent(Intent.ACTION_SEND).apply {
-                        type = currentPhoto.mimeType
-                        putExtra(Intent.EXTRA_STREAM, currentPhoto.contentUri())
-                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                    }, "Share"
-                )
-                context.startActivity(shareIntent)
-            }) {
-                Icon(Icons.Default.Share, "Share", tint = Color.White)
+            // Share button — downloads from Telegram first if local file was deleted
+            val isSharing = shareStatus != null && shareStatus?.contains("failed") == false
+            IconButton(
+                onClick = { vm.sharePhoto(currentPhoto, context) },
+                enabled = !isSharing
+            ) {
+                if (isSharing) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(20.dp),
+                        color = Color.White,
+                        strokeWidth = 2.dp
+                    )
+                } else {
+                    Icon(Icons.Default.Share, "Share", tint = Color.White)
+                }
             }
 
             // Restore / download button
@@ -198,6 +229,20 @@ fun PhotoDetailScreen(
                         msg.contains("✓") -> Color(0xFF80FF80)
                         else              -> Color(0xFFFF8080)
                     })
+                Spacer(Modifier.height(4.dp))
+            }
+            shareStatus?.let { msg ->
+                Row(verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    if (!msg.contains("failed")) {
+                        CircularProgressIndicator(Modifier.size(12.dp),
+                            color = Color.White.copy(0.7f), strokeWidth = 1.5.dp)
+                    }
+                    Text(msg,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = if (msg.contains("failed")) Color(0xFFFF8080)
+                                else Color.White.copy(alpha = 0.7f))
+                }
                 Spacer(Modifier.height(4.dp))
             }
             val fmt = SimpleDateFormat("MMM d, yyyy  HH:mm", Locale.getDefault())
