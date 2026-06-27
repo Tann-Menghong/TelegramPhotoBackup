@@ -22,8 +22,8 @@ android {
         applicationId = "com.example.tgphotobackup"
         minSdk = 26
         targetSdk = 34
-        versionCode = 40
-        versionName = "1.40"
+        versionCode = 41
+        versionName = "1.41"
     }
 
     buildTypes {
