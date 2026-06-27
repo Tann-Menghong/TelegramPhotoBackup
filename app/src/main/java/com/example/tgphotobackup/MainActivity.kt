@@ -497,15 +497,75 @@ private fun HomeScreen(vm: MainViewModel) {
         }
 
         val failedCount by vm.failedCount.collectAsState()
+        val failedUploads by vm.failedUploads.collectAsState()
         if (failedCount > 0) {
-            AlertBanner(
-                Icons.Default.Warning,
-                "$failedCount file${if (failedCount > 1) "s" else ""} failed last backup",
-                "Tap Retry to upload them again.",
-                MaterialTheme.colorScheme.errorContainer,
-                MaterialTheme.colorScheme.onErrorContainer,
-                "Retry"
-            ) { vm.retryFailed() }
+            var showFailedList by remember { mutableStateOf(false) }
+            Surface(
+                Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp),
+                color = MaterialTheme.colorScheme.errorContainer
+            ) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalAlignment = Alignment.Top
+                    ) {
+                        Icon(Icons.Default.Warning, null,
+                            tint = MaterialTheme.colorScheme.onErrorContainer,
+                            modifier = Modifier.size(20.dp).padding(top = 2.dp))
+                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Text(
+                                "$failedCount file${if (failedCount > 1) "s" else ""} failed last backup",
+                                style = MaterialTheme.typography.labelLarge,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onErrorContainer
+                            )
+                            Text(
+                                "Retry to try again, or Dismiss to clear the list.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.8f)
+                            )
+                        }
+                    }
+                    if (showFailedList && failedUploads.isNotEmpty()) {
+                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            failedUploads.take(10).forEach { f ->
+                                Text(
+                                    "• ${f.displayName}  —  ${f.errorMessage}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.75f),
+                                    maxLines = 1,
+                                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                                )
+                            }
+                            if (failedUploads.size > 10) {
+                                Text("…and ${failedUploads.size - 10} more",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.6f))
+                            }
+                        }
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        TextButton(
+                            onClick = { showFailedList = !showFailedList },
+                            colors = ButtonDefaults.textButtonColors(
+                                contentColor = MaterialTheme.colorScheme.onErrorContainer)
+                        ) { Text(if (showFailedList) "Hide" else "Details",
+                            style = MaterialTheme.typography.labelMedium) }
+                        Spacer(Modifier.weight(1f))
+                        TextButton(
+                            onClick = { vm.clearAllFailed() },
+                            colors = ButtonDefaults.textButtonColors(
+                                contentColor = MaterialTheme.colorScheme.onErrorContainer)
+                        ) { Text("Dismiss", style = MaterialTheme.typography.labelMedium) }
+                        TextButton(
+                            onClick = { vm.retryFailed() },
+                            colors = ButtonDefaults.textButtonColors(
+                                contentColor = MaterialTheme.colorScheme.onErrorContainer)
+                        ) { Text("Retry", style = MaterialTheme.typography.labelMedium) }
+                    }
+                }
+            }
         }
 
         // ── App update ─────────────────────────────────────────

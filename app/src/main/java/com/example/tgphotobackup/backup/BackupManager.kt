@@ -74,14 +74,19 @@ class BackupManager(private val context: Context) {
             onProgress(index, media.size, photo.displayName, speedBps, etaSec)
 
             if (dao.findBySignature(photo.id, photo.size, photo.dateModified) != null) {
+                runCatching { failedDao.deleteByMediaId(photo.id) }
                 skipped++; return@forEachIndexed
             }
-            if (photo.size > MAX_FILE_BYTES) { oversized++; return@forEachIndexed }
+            if (photo.size > MAX_FILE_BYTES) {
+                runCatching { failedDao.deleteByMediaId(photo.id) }
+                oversized++; return@forEachIndexed
+            }
 
             try {
                 val hash = computeHash(photo.uri) ?: throw IllegalStateException("Cannot open ${photo.uri}")
 
                 if (hash in sessionHashes || dao.findByHash(hash) != null) {
+                    runCatching { failedDao.deleteByMediaId(photo.id) }
                     skipped++; return@forEachIndexed
                 }
 
@@ -133,6 +138,13 @@ class BackupManager(private val context: Context) {
                     ))
                 }
             }
+        }
+
+        // Remove stale failure records for files no longer on device (can never be retried)
+        val scannedIds = media.map { it.id }.toSet()
+        runCatching {
+            failedDao.getAll().filter { it.mediaId !in scannedIds }
+                .forEach { failedDao.deleteByMediaId(it.mediaId) }
         }
 
         onProgress(media.size, media.size, "Done", 0L, 0L)
