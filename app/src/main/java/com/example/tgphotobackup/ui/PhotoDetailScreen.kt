@@ -48,8 +48,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.shape.CircleShape
 import coil.compose.AsyncImage
 import coil.compose.SubcomposeAsyncImage
+import com.example.tgphotobackup.backup.ThumbnailCache
 import com.example.tgphotobackup.data.UploadedPhoto
 import com.example.tgphotobackup.data.contentUri
 import com.example.tgphotobackup.data.isVideo
@@ -71,12 +73,14 @@ fun PhotoDetailScreen(
     var offsetY       by remember { mutableFloatStateOf(0f) }
     val restoreStatus by vm.restoreStatus.collectAsState()
     val shareStatus   by vm.shareStatus.collectAsState()
+    val playStatus    by vm.playStatus.collectAsState()
     val currentPhoto  = photos.getOrNull(pagerState.currentPage) ?: return
     val context       = LocalContext.current
 
     LaunchedEffect(pagerState.currentPage) {
         scale = 1f; offsetX = 0f; offsetY = 0f
         vm.clearShareStatus()
+        vm.clearPlayStatus()
     }
 
     Box(Modifier.fillMaxSize().background(Color.Black)) {
@@ -105,22 +109,49 @@ fun PhotoDetailScreen(
                     ),
                 contentScale = ContentScale.Fit,
                 error = {
-                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.spacedBy(12.dp),
-                            modifier = Modifier.padding(40.dp)
-                        ) {
-                            Icon(Icons.Default.CloudOff, null, Modifier.size(64.dp),
-                                tint = Color.White.copy(alpha = 0.25f))
-                            Text("Deleted from device",
-                                color = Color.White.copy(alpha = 0.6f),
-                                style = MaterialTheme.typography.bodyLarge,
-                                textAlign = TextAlign.Center)
-                            Text("Tap  🔗  Share to send directly\nor  ↓  Download to save back to gallery",
-                                color = Color.White.copy(alpha = 0.38f),
-                                style = MaterialTheme.typography.bodySmall,
-                                textAlign = TextAlign.Center)
+                    val pageCtx   = LocalContext.current
+                    val pagePhoto = photos[page]
+                    val thumbFile = ThumbnailCache.file(pageCtx, pagePhoto.contentHash)
+                    if (pagePhoto.isVideo() && thumbFile.exists()) {
+                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            AsyncImage(
+                                model = thumbFile,
+                                contentDescription = pagePhoto.displayName,
+                                modifier = Modifier.fillMaxSize(),
+                                contentScale = ContentScale.Fit
+                            )
+                            Box(
+                                Modifier
+                                    .size(72.dp)
+                                    .background(Color.Black.copy(alpha = 0.45f), CircleShape),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(Icons.Default.PlayCircle, "Play", Modifier.size(56.dp),
+                                    tint = Color.White.copy(alpha = 0.85f))
+                            }
+                        }
+                    } else {
+                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(12.dp),
+                                modifier = Modifier.padding(40.dp)
+                            ) {
+                                Icon(Icons.Default.CloudOff, null, Modifier.size(64.dp),
+                                    tint = Color.White.copy(alpha = 0.25f))
+                                Text("Deleted from device",
+                                    color = Color.White.copy(alpha = 0.6f),
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    textAlign = TextAlign.Center)
+                                Text(
+                                    if (pagePhoto.isVideo())
+                                        "Tap  ▶  Play to stream\nor  ↓  Download to save back"
+                                    else
+                                        "Tap  🔗  Share to send directly\nor  ↓  Download to save back to gallery",
+                                    color = Color.White.copy(alpha = 0.38f),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    textAlign = TextAlign.Center)
+                            }
                         }
                     }
                 }
@@ -166,16 +197,22 @@ fun PhotoDetailScreen(
                 modifier = Modifier.size(20.dp)
             )
 
-            // Play button for videos (opens system video player)
+            // Play button for videos — downloads from Telegram if local file was deleted
             if (currentPhoto.isVideo()) {
-                IconButton(onClick = {
-                    val intent = Intent(Intent.ACTION_VIEW).apply {
-                        setDataAndType(currentPhoto.contentUri(), currentPhoto.mimeType)
-                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                val isPlaying = playStatus != null && playStatus?.contains("failed") == false
+                IconButton(
+                    onClick = { vm.playVideo(currentPhoto, context) },
+                    enabled = !isPlaying
+                ) {
+                    if (isPlaying) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(20.dp),
+                            color = Color.White,
+                            strokeWidth = 2.dp
+                        )
+                    } else {
+                        Icon(Icons.Default.PlayCircle, "Play video", tint = Color.White)
                     }
-                    runCatching { context.startActivity(intent) }
-                }) {
-                    Icon(Icons.Default.PlayCircle, "Play video", tint = Color.White)
                 }
             }
 
@@ -232,6 +269,20 @@ fun PhotoDetailScreen(
                 Spacer(Modifier.height(4.dp))
             }
             shareStatus?.let { msg ->
+                Row(verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    if (!msg.contains("failed")) {
+                        CircularProgressIndicator(Modifier.size(12.dp),
+                            color = Color.White.copy(0.7f), strokeWidth = 1.5.dp)
+                    }
+                    Text(msg,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = if (msg.contains("failed")) Color(0xFFFF8080)
+                                else Color.White.copy(alpha = 0.7f))
+                }
+                Spacer(Modifier.height(4.dp))
+            }
+            playStatus?.let { msg ->
                 Row(verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     if (!msg.contains("failed")) {

@@ -418,6 +418,31 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun clearShareStatus() { _shareStatus.value = null }
 
+    // ── Play video (works even when local file is deleted) ─────────────────────
+
+    private val _playStatus = MutableStateFlow<String?>(null)
+    val playStatus = _playStatus.asStateFlow()
+
+    fun playVideo(photo: UploadedPhoto, context: android.content.Context) {
+        viewModelScope.launch(Dispatchers.IO) {
+            _playStatus.value = "Preparing video…"
+            val uri = downloadToShareCache(context, photo)
+            if (uri != null) {
+                val intent = android.content.Intent(android.content.Intent.ACTION_VIEW).apply {
+                    setDataAndType(uri, photo.mimeType)
+                    addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                runCatching { context.startActivity(intent) }
+                _playStatus.value = null
+            } else {
+                _playStatus.value = "Download failed — check bot token & connection"
+            }
+        }
+    }
+
+    fun clearPlayStatus() { _playStatus.value = null }
+
     private suspend fun downloadToShareCache(
         context: android.content.Context,
         photo: UploadedPhoto
