@@ -80,8 +80,9 @@ dependencies {
     // OkHttp (Telegram Bot API calls)
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
 
-    // Coil (photo thumbnails)
+    // Coil (photo thumbnails + video frame extraction)
     implementation("io.coil-kt:coil-compose:2.7.0")
+    implementation("io.coil-kt:coil-video:2.7.0")
 
     // Glance (home screen widget)
     implementation("androidx.glance:glance-appwidget:1.1.0")

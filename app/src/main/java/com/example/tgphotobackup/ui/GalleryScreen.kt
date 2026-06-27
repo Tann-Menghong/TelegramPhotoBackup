@@ -70,6 +70,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import coil.compose.SubcomposeAsyncImage
+import coil.decode.VideoFrameDecoder
+import coil.request.ImageRequest
 import com.example.tgphotobackup.backup.ThumbnailCache
 import com.example.tgphotobackup.data.UploadedPhoto
 import com.example.tgphotobackup.data.contentUri
@@ -465,12 +467,23 @@ private fun Thumbnail(
     onClick: () -> Unit,
     onLongClick: () -> Unit
 ) {
+    val context = LocalContext.current
+    val thumbModel = remember(photo.contentHash) {
+        if (photo.isVideo()) {
+            ImageRequest.Builder(context)
+                .data(photo.contentUri())
+                .decoderFactory(VideoFrameDecoder.Factory())
+                .build()
+        } else {
+            photo.contentUri()
+        }
+    }
     Box(
         Modifier.aspectRatio(1f)
             .combinedClickable(onClick = onClick, onLongClick = onLongClick)
     ) {
         SubcomposeAsyncImage(
-            model = photo.contentUri(),
+            model = thumbModel,
             contentDescription = photo.displayName,
             modifier = Modifier.fillMaxSize(),
             contentScale = ContentScale.Crop,
