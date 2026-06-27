@@ -27,6 +27,7 @@ import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -34,6 +35,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -53,8 +55,15 @@ import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material.icons.filled.BatteryChargingFull
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.CloudDone
+import androidx.compose.material.icons.filled.CloudOff
+import androidx.compose.material.icons.filled.CloudSync
 import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.GridView
+import androidx.compose.material.icons.outlined.CloudUpload
+import androidx.compose.material.icons.outlined.GridView
+import androidx.compose.material.icons.outlined.PhotoLibrary
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.Folder
@@ -85,6 +94,8 @@ import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.ListItem
+import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -128,8 +139,12 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import coil.compose.AsyncImage
 import com.example.tgphotobackup.backup.BackupWorker
+import com.example.tgphotobackup.data.AppSettings
 import com.example.tgphotobackup.data.BackupRun
+import com.example.tgphotobackup.data.UploadedPhoto
+import com.example.tgphotobackup.data.contentUri
 import com.example.tgphotobackup.ui.UpdateState
 import com.example.tgphotobackup.ui.GalleryScreen
 import com.example.tgphotobackup.ui.HistoryScreen
@@ -174,6 +189,7 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
                 }
 
                 var showSettings       by remember { mutableStateOf(false) }
+                var showHistory        by remember { mutableStateOf(false) }
                 var selectedTab        by remember { mutableIntStateOf(0) }
                 val biometricLock = settings.biometricLock
                 var isLocked by remember(biometricLock) { mutableStateOf(biometricLock) }
@@ -191,24 +207,17 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
                     }
                 }
 
-                val tabs = listOf(
-                    "Home"    to Icons.Default.Home,
-                    "Gallery" to Icons.Default.PhotoLibrary,
-                    "History" to Icons.Default.History,
-                    "Stats"   to Icons.Default.BarChart
-                )
-
                 Box(Modifier.fillMaxSize()) {
                     Scaffold(
                         containerColor = MaterialTheme.colorScheme.background,
                         snackbarHost = { SnackbarHost(snackbarHostState) },
                         topBar = {
-                            CenterAlignedTopAppBar(
+                            TopAppBar(
                                 title = {
                                     Text(when (selectedTab) {
-                                        1 -> "Gallery"; 2 -> "History"; 3 -> "Stats"; else -> "TG Backup"
+                                        1 -> "Backup"; 2 -> "Library"; 3 -> "Stats"; else -> "Photos"
                                     }, style = MaterialTheme.typography.titleLarge,
-                                        fontWeight = FontWeight.SemiBold)
+                                        fontWeight = FontWeight.Bold)
                                 },
                                 actions = {
                                     IconButton(onClick = {
@@ -219,7 +228,9 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
                                             autoDeleteAfterBackup = settings.autoDeleteAfterBackup,
                                             themeMode = newMode,
                                             includedAlbums = settings.includedAlbums,
-                                            updateUrl = settings.updateUrl)
+                                            updateUrl = settings.updateUrl,
+                                            biometricLock = settings.biometricLock,
+                                            safFolderUris = settings.safFolderUris)
                                     }) {
                                         Icon(when (settings.themeMode) {
                                             2    -> Icons.Default.LightMode
@@ -227,12 +238,9 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
                                             else -> Icons.Default.Brightness6
                                         }, contentDescription = "Toggle theme")
                                     }
-                                    IconButton(onClick = { showSettings = true }) {
-                                        Icon(Icons.Default.Settings, "Settings")
-                                    }
                                 },
-                                colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
-                                    containerColor = MaterialTheme.colorScheme.background)
+                                colors = TopAppBarDefaults.topAppBarColors(
+                                    containerColor = MaterialTheme.colorScheme.surface)
                             )
                         },
                         bottomBar = {
@@ -240,14 +248,27 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
                                 containerColor = MaterialTheme.colorScheme.surface,
                                 tonalElevation = 3.dp
                             ) {
-                                tabs.forEachIndexed { i, (label, icon) ->
-                                    NavigationBarItem(
-                                        selected = selectedTab == i,
-                                        onClick  = { selectedTab = i },
-                                        icon  = { Icon(icon, label) },
-                                        label = { Text(label, style = MaterialTheme.typography.labelSmall) }
-                                    )
-                                }
+                                NavigationBarItem(
+                                    selected = selectedTab == 0,
+                                    onClick  = { selectedTab = 0 },
+                                    icon  = { Icon(if (selectedTab == 0) Icons.Default.PhotoLibrary
+                                                   else Icons.Outlined.PhotoLibrary, "Photos") },
+                                    label = { Text("Photos", style = MaterialTheme.typography.labelSmall) }
+                                )
+                                NavigationBarItem(
+                                    selected = selectedTab == 1,
+                                    onClick  = { selectedTab = 1 },
+                                    icon  = { Icon(if (selectedTab == 1) Icons.Default.CloudUpload
+                                                   else Icons.Outlined.CloudUpload, "Backup") },
+                                    label = { Text("Backup", style = MaterialTheme.typography.labelSmall) }
+                                )
+                                NavigationBarItem(
+                                    selected = selectedTab == 2 || selectedTab == 3,
+                                    onClick  = { selectedTab = 2 },
+                                    icon  = { Icon(if (selectedTab == 2 || selectedTab == 3) Icons.Default.GridView
+                                                   else Icons.Outlined.GridView, "Library") },
+                                    label = { Text("Library", style = MaterialTheme.typography.labelSmall) }
+                                )
                             }
                         }
                     ) { padding ->
@@ -267,10 +288,15 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
                                 label = "tab_content"
                             ) { tab ->
                                 when (tab) {
-                                    1 -> GalleryScreen(vm) { idx -> selectedPhotoIndex = idx }
-                                    2 -> HistoryScreen(vm)
+                                    1 -> BackupTab(vm, settings)
+                                    2 -> LibraryTab(
+                                        vm,
+                                        onSettings = { showSettings = true },
+                                        onStats = { selectedTab = 3 },
+                                        onHistory = { showHistory = true }
+                                    )
                                     3 -> StatsScreen(vm)
-                                    else -> HomeScreen(vm)
+                                    else -> GalleryScreen(vm) { idx -> selectedPhotoIndex = idx }
                                 }
                             }
                             selectedPhotoIndex?.let { idx ->
@@ -294,6 +320,15 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
                     ) {
                         SettingsScreen(vm) { showSettings = false }
                     }
+
+                    // Backup history slides in from the right as a full-screen overlay
+                    AnimatedVisibility(
+                        visible = showHistory,
+                        enter = slideInHorizontally(animationSpec = tween(380)) { it } + fadeIn(tween(350)),
+                        exit  = slideOutHorizontally(animationSpec = tween(330)) { it } + fadeOut(tween(300))
+                    ) {
+                        HistoryOverlay(vm) { showHistory = false }
+                    }
                     if (isLocked) {
                         LockScreen { isLocked = false }
                     }
@@ -308,9 +343,8 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
 // ─────────────────────────────────────────────────────────────────────────────
 
 @Composable
-private fun HomeScreen(vm: MainViewModel) {
+private fun BackupTab(vm: MainViewModel, settings: AppSettings) {
     val context       = LocalContext.current
-    val settings      by vm.settings.collectAsState()
     val status        by vm.status.collectAsState()
     val stats         by vm.stats.collectAsState()
     val localFreeUris by vm.localFreeUris.collectAsState()
@@ -372,54 +406,63 @@ private fun HomeScreen(vm: MainViewModel) {
     ) {
         Spacer(Modifier.height(4.dp))
 
-        // ── Hero card ──────────────────────────────────────────
-        val animatedBackedUp by animateIntAsState(
-            targetValue = stats.totalBackedUp,
-            animationSpec = tween(durationMillis = 800, easing = FastOutSlowInEasing),
-            label = "backed_up_count"
-        )
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(24.dp))
-                .background(
-                    Brush.linearGradient(
-                        colors = listOf(
-                            MaterialTheme.colorScheme.primaryContainer,
-                            MaterialTheme.colorScheme.secondaryContainer
-                        )
-                    )
-                )
+        // ── Status card (Google Photos style) ──────────────────
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(
+                containerColor = if (status.running)
+                    MaterialTheme.colorScheme.primaryContainer
+                else
+                    MaterialTheme.colorScheme.surfaceVariant
+            ),
+            shape = RoundedCornerShape(16.dp)
         ) {
-            Row(Modifier.padding(24.dp).fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween) {
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text("Backed up",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f))
-                    Text("$animatedBackedUp",
-                        style = MaterialTheme.typography.displaySmall,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onPrimaryContainer)
-                    Text("of ${stats.totalOnDevice} files · ${formatBytes(stats.backedUpBytes)}",
+            Row(Modifier.padding(20.dp), verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                Icon(
+                    if (status.running) Icons.Default.CloudSync
+                    else if (settings.isConfigured) Icons.Default.CloudDone
+                    else Icons.Default.CloudOff,
+                    null,
+                    Modifier.size(40.dp),
+                    tint = if (status.running) MaterialTheme.colorScheme.primary
+                           else if (settings.isConfigured) MaterialTheme.colorScheme.primary
+                           else MaterialTheme.colorScheme.error
+                )
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        when {
+                            !settings.isConfigured -> "Backup not configured"
+                            status.running -> "Backing up…"
+                            else -> "Backup is on"
+                        },
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Text(
+                        when {
+                            !settings.isConfigured -> "Add your bot token in Settings"
+                            status.running -> "${status.done}/${status.total} • ${status.currentName}"
+                            else -> "${stats.totalBackedUp} items backed up • ${formatBytes(stats.backedUpBytes)}"
+                        },
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f))
-                    Spacer(Modifier.height(2.dp))
-                    val lastLabel = when {
-                        stats.lastBackupTime > 0 -> "Last: " + SimpleDateFormat(
-                            "MMM d, HH:mm", Locale.getDefault()).format(Date(stats.lastBackupTime))
-                        settings.isConfigured -> "No backup yet"
-                        else -> "Configure in Settings"
-                    }
-                    Text(lastLabel, style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.6f))
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
-                ArcProgress(progress = progress, modifier = Modifier.size(96.dp),
-                    primaryColor = MaterialTheme.colorScheme.primary,
-                    trackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
-                    label = "${(progress * 100).toInt()}%")
             }
+        }
+
+        // ── Quick stats row ────────────────────────────────────
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            QuickStat("Backed up", "${stats.totalBackedUp}", Modifier.weight(1f))
+            QuickStat("Size", formatBytes(stats.backedUpBytes), Modifier.weight(1f))
+            QuickStat(
+                "Last backup",
+                if (stats.lastBackupTime > 0)
+                    SimpleDateFormat("MMM d", Locale.getDefault()).format(Date(stats.lastBackupTime))
+                else "—",
+                Modifier.weight(1f)
+            )
         }
 
         // ── What's New (shown once after each update) ──────────
@@ -740,6 +783,156 @@ private fun HomeScreen(vm: MainViewModel) {
         }
 
         Spacer(Modifier.height(8.dp))
+    }
+}
+
+// ─── Quick stat tile ──────────────────────────────────────────────────────────
+
+@Composable
+private fun QuickStat(label: String, value: String, modifier: Modifier = Modifier) {
+    Card(
+        modifier = modifier,
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.cardElevation(1.dp)
+    ) {
+        Column(Modifier.padding(14.dp)) {
+            Text(value, style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold, maxLines = 1)
+            Spacer(Modifier.height(2.dp))
+            Text(label, style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
+// ─── Library Tab ──────────────────────────────────────────────────────────────
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun LibraryTab(
+    vm: MainViewModel,
+    onSettings: () -> Unit,
+    onStats: () -> Unit,
+    onHistory: () -> Unit
+) {
+    val allPhotos by vm.allBackedUpPhotos.collectAsState()
+    val albums = remember(allPhotos) {
+        allPhotos.groupBy { it.bucketName.ifBlank { "Unknown" } }.entries
+            .sortedByDescending { it.value.size }
+            .take(12)
+    }
+
+    androidx.compose.foundation.lazy.LazyColumn(
+        Modifier.fillMaxSize(),
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 16.dp)
+    ) {
+        item {
+            Text("Albums", Modifier.padding(start = 16.dp, top = 16.dp, bottom = 8.dp),
+                style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+        }
+
+        albums.chunked(2).forEach { row ->
+            item {
+                Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    row.forEach { entry ->
+                        AlbumCard(
+                            name = entry.key.ifBlank { "Unknown" },
+                            count = entry.value.size,
+                            coverPhoto = entry.value.firstOrNull(),
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                    if (row.size == 1) Spacer(Modifier.weight(1f))
+                }
+            }
+        }
+
+        item { HorizontalDivider(Modifier.padding(vertical = 16.dp, horizontal = 16.dp)) }
+
+        item {
+            ListItem(
+                headlineContent = { Text("Statistics") },
+                supportingContent = { Text("Storage usage, upload trends") },
+                leadingContent = { Icon(Icons.Default.BarChart, null,
+                    tint = MaterialTheme.colorScheme.primary) },
+                modifier = Modifier.clickable(onClick = onStats)
+            )
+        }
+        item {
+            ListItem(
+                headlineContent = { Text("Backup history") },
+                supportingContent = { Text("Previous backup runs") },
+                leadingContent = { Icon(Icons.Default.History, null,
+                    tint = MaterialTheme.colorScheme.primary) },
+                modifier = Modifier.clickable(onClick = onHistory)
+            )
+        }
+        item {
+            ListItem(
+                headlineContent = { Text("Settings") },
+                supportingContent = { Text("Bot token, schedule, storage") },
+                leadingContent = { Icon(Icons.Default.Settings, null,
+                    tint = MaterialTheme.colorScheme.primary) },
+                modifier = Modifier.clickable(onClick = onSettings)
+            )
+        }
+    }
+}
+
+@Composable
+private fun AlbumCard(
+    name: String,
+    count: Int,
+    coverPhoto: UploadedPhoto?,
+    modifier: Modifier = Modifier
+) {
+    Column(modifier.padding(bottom = 8.dp)) {
+        Box(Modifier.fillMaxWidth().aspectRatio(1f).clip(RoundedCornerShape(12.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant)) {
+            coverPhoto?.let {
+                AsyncImage(
+                    model = it.contentUri(),
+                    contentDescription = name,
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = androidx.compose.ui.layout.ContentScale.Crop
+                )
+            }
+        }
+        Spacer(Modifier.height(4.dp))
+        Text(name, style = MaterialTheme.typography.labelLarge,
+            fontWeight = FontWeight.SemiBold, maxLines = 1,
+            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+        Text("$count items", style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+// ─── History overlay (wraps do-not-modify HistoryScreen) ─────────────────────
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun HistoryOverlay(vm: MainViewModel, onBack: () -> Unit) {
+    Scaffold(
+        containerColor = MaterialTheme.colorScheme.background,
+        topBar = {
+            CenterAlignedTopAppBar(
+                title = { Text("Backup history", style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.SemiBold) },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back")
+                    }
+                },
+                colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.background)
+            )
+        }
+    ) { padding ->
+        Box(Modifier.padding(padding)) {
+            HistoryScreen(vm)
+        }
     }
 }
 
