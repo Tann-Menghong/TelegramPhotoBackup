@@ -2,6 +2,7 @@ package com.example.tgphotobackup.backup
 
 import android.content.Context
 import com.example.tgphotobackup.data.AppDatabase
+import com.example.tgphotobackup.data.FailedUpload
 import com.example.tgphotobackup.data.SettingsRepository
 import com.example.tgphotobackup.data.UploadedPhoto
 import com.example.tgphotobackup.telegram.TelegramClient
@@ -23,6 +24,7 @@ data class BackupSummary(
 class BackupManager(private val context: Context) {
 
     private val dao = AppDatabase.get(context).uploadedPhotoDao()
+    private val failedDao = AppDatabase.get(context).failedUploadDao()
     private val settingsRepo = SettingsRepository(context)
 
     suspend fun backup(
@@ -36,11 +38,19 @@ class BackupManager(private val context: Context) {
         val maxBytes = settings.maxFileSizeBytes
 
         // Filter by selected albums (empty set = all albums)
-        val media = MediaStoreScanner.queryAll(context, includeVideos)
+        val mediaStoreMedia = MediaStoreScanner.queryAll(context, includeVideos)
             .filter { it.size > 0 }
             .filter {
                 settings.includedAlbums.isEmpty() || it.bucketName in settings.includedAlbums
             }
+
+        // Additional files from user-selected SAF folders (always included).
+        val safMedia = MediaStoreScanner
+            .querySafFolders(context, settings.safFolderUris, includeVideos)
+            .filter { it.size > 0 }
+
+        val media = (mediaStoreMedia + safMedia)
+            .distinctBy { it.uri }
             .sortedBy { it.dateModified }
 
         var uploaded   = 0
@@ -112,6 +122,12 @@ class BackupManager(private val context: Context) {
                 bytesUploaded += photo.size
                 uploaded++
 
+                // This file succeeded — clear any previous failure record for it.
+                runCatching { failedDao.deleteByMediaId(photo.id) }
+
+                // Cache a thumbnail so the gallery can still show it after local deletion.
+                ThumbnailCache.save(context, photo.id, photo.mime, hash)
+
                 // Auto-delete local copy after successful upload
                 if (settings.autoDeleteAfterBackup) {
                     runCatching { context.contentResolver.delete(photo.uri, null, null) }
@@ -120,6 +136,18 @@ class BackupManager(private val context: Context) {
             } catch (e: Exception) {
                 if (firstError == null) firstError = e.message ?: e.javaClass.simpleName
                 failed++
+                runCatching {
+                    failedDao.insert(
+                        FailedUpload(
+                            mediaId      = photo.id,
+                            displayName  = photo.displayName,
+                            sizeBytes    = photo.size,
+                            mimeType     = photo.mime,
+                            bucketName   = photo.bucketName,
+                            errorMessage = e.message ?: e.javaClass.simpleName
+                        )
+                    )
+                }
             }
         }
 

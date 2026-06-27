@@ -23,7 +23,9 @@ data class AppSettings(
     val autoDeleteAfterBackup: Boolean = false,
     val themeMode: Int = 0,              // 0=system, 1=light, 2=dark
     val includedAlbums: Set<String> = emptySet(),  // empty = all albums
-    val updateUrl: String = "https://github.com/Tann-Menghong/TelegramPhotoBackup"
+    val updateUrl: String = "https://github.com/Tann-Menghong/TelegramPhotoBackup",
+    val biometricLock: Boolean = false,
+    val safFolderUris: Set<String> = emptySet()
 ) {
     val isConfigured: Boolean get() = botToken.isNotBlank() && chatId.isNotBlank()
     val maxFileSizeBytes: Long get() = maxFileSizeMb.toLong() * 1024 * 1024
@@ -48,7 +50,11 @@ class SettingsRepository(private val context: Context) {
             } ?: emptySet(),
             updateUrl               = p[UPDATE_URL]
                                         ?.takeIf { it.isNotBlank() }
-                                        ?: "https://github.com/Tann-Menghong/TelegramPhotoBackup"
+                                        ?: "https://github.com/Tann-Menghong/TelegramPhotoBackup",
+            biometricLock           = p[BIOMETRIC_LOCK] ?: false,
+            safFolderUris           = p[INCLUDED_SAF_FOLDERS]?.let { s ->
+                if (s.isBlank()) emptySet() else s.split("\n").filter { it.isNotBlank() }.toSet()
+            } ?: emptySet()
         )
     }
 
@@ -64,7 +70,9 @@ class SettingsRepository(private val context: Context) {
         autoDeleteAfterBackup: Boolean = false,
         themeMode: Int = 0,
         includedAlbums: Set<String> = emptySet(),
-        updateUrl: String = ""
+        updateUrl: String = "",
+        biometricLock: Boolean = false,
+        safFolderUris: Set<String> = emptySet()
     ) {
         context.dataStore.edit { p ->
             p[BOT_TOKEN]                 = botToken.trim()
@@ -79,6 +87,8 @@ class SettingsRepository(private val context: Context) {
             p[THEME_MODE]                = themeMode
             p[INCLUDED_ALBUMS]           = includedAlbums.joinToString(",")
             p[UPDATE_URL]                = updateUrl.trim()
+            p[BIOMETRIC_LOCK]            = biometricLock
+            p[INCLUDED_SAF_FOLDERS]      = safFolderUris.joinToString("\n")
         }
     }
 
@@ -95,5 +105,7 @@ class SettingsRepository(private val context: Context) {
         private val THEME_MODE                 = intPreferencesKey("theme_mode")
         private val INCLUDED_ALBUMS            = stringPreferencesKey("included_albums")
         private val UPDATE_URL                 = stringPreferencesKey("update_url")
+        private val BIOMETRIC_LOCK             = booleanPreferencesKey("biometric_lock")
+        private val INCLUDED_SAF_FOLDERS       = stringPreferencesKey("included_saf_folders")
     }
 }

@@ -22,8 +22,8 @@ android {
         applicationId = "com.example.tgphotobackup"
         minSdk = 26
         targetSdk = 34
-        versionCode = 39
-        versionName = "1.39"
+        versionCode = 40
+        versionName = "1.40"
     }
 
     buildTypes {
@@ -86,4 +86,10 @@ dependencies {
     // Glance (home screen widget)
     implementation("androidx.glance:glance-appwidget:1.1.0")
     implementation("androidx.glance:glance-material3:1.1.0")
+
+    // Biometric (app lock)
+    implementation("androidx.biometric:biometric:1.1.0")
+
+    // DocumentFile (SAF folder backup)
+    implementation("androidx.documentfile:documentfile:1.0.1")
 }

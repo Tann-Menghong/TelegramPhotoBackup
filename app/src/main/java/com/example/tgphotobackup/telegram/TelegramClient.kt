@@ -130,8 +130,13 @@ class TelegramClient(private val token: String) {
     // ── Verification ─────────────────────────────────────────────────────────
 
     /** Returns true if the file is still accessible on Telegram. */
-    fun fileExists(fileId: String): Boolean =
-        getFilePath(fileId).isSuccess
+    fun fileExists(fileId: String): Boolean {
+        val result = getFilePath(fileId)
+        if (result.isSuccess) return true
+        val msg = result.exceptionOrNull()?.message ?: ""
+        // Files > 20 MB cannot be fetched via getFile, but they DO still exist on Telegram.
+        return msg.contains("file is too big", ignoreCase = true)
+    }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 

@@ -8,13 +8,14 @@ import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
 @Database(
-    entities = [UploadedPhoto::class, BackupRun::class],
-    version = 5,
+    entities = [UploadedPhoto::class, BackupRun::class, FailedUpload::class],
+    version = 6,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun uploadedPhotoDao(): UploadedPhotoDao
     abstract fun backupRunDao(): BackupRunDao
+    abstract fun failedUploadDao(): FailedUploadDao
 
     companion object {
         const val DB_NAME = "tg_photo_backup.db"
@@ -22,6 +23,22 @@ abstract class AppDatabase : RoomDatabase() {
         private val MIGRATION_4_5 = object : Migration(4, 5) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE uploaded_photos ADD COLUMN bucketName TEXT NOT NULL DEFAULT ''")
+            }
+        }
+
+        private val MIGRATION_5_6 = object : Migration(5, 6) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `failed_uploads` (" +
+                        "`mediaId` INTEGER NOT NULL, " +
+                        "`displayName` TEXT NOT NULL, " +
+                        "`sizeBytes` INTEGER NOT NULL, " +
+                        "`mimeType` TEXT NOT NULL DEFAULT 'image/jpeg', " +
+                        "`bucketName` TEXT NOT NULL DEFAULT '', " +
+                        "`errorMessage` TEXT NOT NULL, " +
+                        "`failedAt` INTEGER NOT NULL, " +
+                        "PRIMARY KEY(`mediaId`))"
+                )
             }
         }
 
@@ -34,7 +51,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     DB_NAME
                 )
-                .addMigrations(MIGRATION_4_5)
+                .addMigrations(MIGRATION_4_5, MIGRATION_5_6)
                 .build()
                 .also { INSTANCE = it }
             }

@@ -67,6 +67,11 @@ import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.VerifiedUser
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.filled.WifiOff
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.BarChart
+import androidx.compose.material.icons.filled.Brightness6
+import androidx.compose.material.icons.filled.Fingerprint
+import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -132,13 +137,15 @@ import com.example.tgphotobackup.ui.MainViewModel
 import com.example.tgphotobackup.ui.PhotoDetailScreen
 import com.example.tgphotobackup.ui.TgBackupTheme
 import com.example.tgphotobackup.ui.formatBytes
+import com.example.tgphotobackup.ui.LockScreen
+import com.example.tgphotobackup.ui.StatsScreen
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 
-class MainActivity : ComponentActivity() {
+class MainActivity : androidx.fragment.app.FragmentActivity() {
     @OptIn(ExperimentalMaterial3Api::class)
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -168,6 +175,8 @@ class MainActivity : ComponentActivity() {
 
                 var showSettings       by remember { mutableStateOf(false) }
                 var selectedTab        by remember { mutableIntStateOf(0) }
+                val biometricLock = settings.biometricLock
+                var isLocked by remember(biometricLock) { mutableStateOf(biometricLock) }
                 var selectedPhotoIndex by remember { mutableStateOf<Int?>(null) }
                 val allPhotos          by vm.allBackedUpPhotos.collectAsState()
 
@@ -185,7 +194,8 @@ class MainActivity : ComponentActivity() {
                 val tabs = listOf(
                     "Home"    to Icons.Default.Home,
                     "Gallery" to Icons.Default.PhotoLibrary,
-                    "History" to Icons.Default.History
+                    "History" to Icons.Default.History,
+                    "Stats"   to Icons.Default.BarChart
                 )
 
                 Box(Modifier.fillMaxSize()) {
@@ -196,11 +206,27 @@ class MainActivity : ComponentActivity() {
                             CenterAlignedTopAppBar(
                                 title = {
                                     Text(when (selectedTab) {
-                                        1 -> "Gallery"; 2 -> "History"; else -> "TG Backup"
+                                        1 -> "Gallery"; 2 -> "History"; 3 -> "Stats"; else -> "TG Backup"
                                     }, style = MaterialTheme.typography.titleLarge,
                                         fontWeight = FontWeight.SemiBold)
                                 },
                                 actions = {
+                                    IconButton(onClick = {
+                                        val newMode = when (settings.themeMode) { 2 -> 1; 1 -> 0; else -> 2 }
+                                        vm.save(settings.botToken, settings.chatId, settings.wifiOnly, settings.autoBackup,
+                                            settings.includeVideos, intervalHours = settings.autoBackupIntervalHours,
+                                            requiresCharging = settings.requiresCharging,
+                                            autoDeleteAfterBackup = settings.autoDeleteAfterBackup,
+                                            themeMode = newMode,
+                                            includedAlbums = settings.includedAlbums,
+                                            updateUrl = settings.updateUrl)
+                                    }) {
+                                        Icon(when (settings.themeMode) {
+                                            2    -> Icons.Default.LightMode
+                                            1    -> Icons.Default.DarkMode
+                                            else -> Icons.Default.Brightness6
+                                        }, contentDescription = "Toggle theme")
+                                    }
                                     IconButton(onClick = { showSettings = true }) {
                                         Icon(Icons.Default.Settings, "Settings")
                                     }
@@ -243,6 +269,7 @@ class MainActivity : ComponentActivity() {
                                 when (tab) {
                                     1 -> GalleryScreen(vm) { idx -> selectedPhotoIndex = idx }
                                     2 -> HistoryScreen(vm)
+                                    3 -> StatsScreen(vm)
                                     else -> HomeScreen(vm)
                                 }
                             }
@@ -266,6 +293,9 @@ class MainActivity : ComponentActivity() {
                         exit  = slideOutHorizontally(animationSpec = tween(330)) { it } + fadeOut(tween(300))
                     ) {
                         SettingsScreen(vm) { showSettings = false }
+                    }
+                    if (isLocked) {
+                        LockScreen { isLocked = false }
                     }
                 }
             }
@@ -459,10 +489,23 @@ private fun HomeScreen(vm: MainViewModel) {
         if (duplicates.isNotEmpty()) {
             AlertBanner(Icons.Default.ContentCopy,
                 "${duplicates.size} duplicate group${if (duplicates.size > 1) "s" else ""} found",
-                "${duplicates.sumOf { it.size }} photos share the same content hash. " +
-                "Use Gallery → long-press to select and clean up.",
+                "${duplicates.sumOf { it.size }} photos share the same content hash.",
                 MaterialTheme.colorScheme.tertiaryContainer,
-                MaterialTheme.colorScheme.onTertiaryContainer, null) {}
+                MaterialTheme.colorScheme.onTertiaryContainer, "Clean up") {
+                vm.deleteAllDuplicates()
+            }
+        }
+
+        val failedCount by vm.failedCount.collectAsState()
+        if (failedCount > 0) {
+            AlertBanner(
+                Icons.Default.Warning,
+                "$failedCount file${if (failedCount > 1) "s" else ""} failed last backup",
+                "Tap Retry to upload them again.",
+                MaterialTheme.colorScheme.errorContainer,
+                MaterialTheme.colorScheme.onErrorContainer,
+                "Retry"
+            ) { vm.retryFailed() }
         }
 
         // ── App update ─────────────────────────────────────────
@@ -662,6 +705,35 @@ private fun HomeScreen(vm: MainViewModel) {
             }
         }
 
+        // ── Bulk restore ───────────────────────────────────────
+        val bulkRestoreStatus by vm.bulkRestoreStatus.collectAsState()
+        if (stats.totalBackedUp > 0 && !status.running) {
+            FilledTonalButton(
+                onClick = { vm.bulkRestore(context) },
+                enabled = settings.isConfigured && bulkRestoreStatus?.startsWith("Restoring") != true,
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp)
+            ) {
+                Icon(Icons.Default.Download, null, Modifier.size(16.dp))
+                Spacer(Modifier.width(4.dp))
+                Text(
+                    if (bulkRestoreStatus?.startsWith("Restoring") == true) bulkRestoreStatus!!
+                    else "Restore all to gallery",
+                    style = MaterialTheme.typography.labelMedium
+                )
+            }
+            bulkRestoreStatus?.takeIf { !it.startsWith("Restoring") }?.let { result ->
+                Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.CheckCircle, null, tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(16.dp))
+                    Text(result, style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+        }
+
         // ── Weekly upload chart ────────────────────────────────
         if (runs.isNotEmpty()) {
             WeeklyChart(runs)
@@ -779,6 +851,19 @@ private fun SettingsScreen(vm: MainViewModel, onBack: () -> Unit) {
     val intervalOptions = listOf(6 to "Every 6 hours", 12 to "Every 12 hours", 24 to "Every 24 hours")
     val themeOptions    = listOf(0 to "System default", 1 to "Light", 2 to "Dark")
 
+    val context = LocalContext.current
+    var biometricLock      by remember(settings.biometricLock)          { mutableStateOf(settings.biometricLock) }
+    var safFolderUris      by remember(settings.safFolderUris)          { mutableStateOf(settings.safFolderUris) }
+    val safLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocumentTree()
+    ) { uri ->
+        uri?.let {
+            context.contentResolver.takePersistableUriPermission(
+                it, android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION
+            )
+            safFolderUris = safFolderUris + it.toString()
+        }
+    }
     var token              by remember(settings.botToken)               { mutableStateOf(settings.botToken) }
     var chatId             by remember(settings.chatId)                 { mutableStateOf(settings.chatId) }
     var wifiOnly           by remember(settings.wifiOnly)               { mutableStateOf(settings.wifiOnly) }
@@ -886,6 +971,9 @@ private fun SettingsScreen(vm: MainViewModel, onBack: () -> Unit) {
                 HorizontalDivider(Modifier.padding(vertical = 2.dp))
                 ToggleRow(Icons.Default.AutoDelete, "Auto-delete after backup",
                     "Remove local copy once safely uploaded", autoDelete) { autoDelete = it }
+                HorizontalDivider(Modifier.padding(vertical = 2.dp))
+                ToggleRow(Icons.Default.Fingerprint, "App lock",
+                    "Require biometrics to open the app", biometricLock) { biometricLock = it }
             }
 
             // ── Albums to back up ──────────────────────────────
@@ -1001,13 +1089,55 @@ private fun SettingsScreen(vm: MainViewModel, onBack: () -> Unit) {
                 }
             }
 
+            // ── Additional Folders ──────────────────────────────
+            SettingsSection("Additional Folders") {
+                Text(
+                    if (safFolderUris.isEmpty()) "Only backing up from Camera roll (default)"
+                    else "${safFolderUris.size} additional folder(s) selected",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(start = 4.dp, bottom = 8.dp)
+                )
+                safFolderUris.forEach { uriStr ->
+                    val displayName = runCatching {
+                        val uri = android.net.Uri.parse(uriStr)
+                        android.provider.DocumentsContract.getTreeDocumentId(uri) ?: uriStr
+                    }.getOrDefault(uriStr)
+                    Row(
+                        Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(Icons.Default.Folder, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)
+                        Text(displayName, Modifier.weight(1f), style = MaterialTheme.typography.bodySmall,
+                            maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                        IconButton(onClick = { safFolderUris = safFolderUris - uriStr },
+                            modifier = Modifier.size(32.dp)) {
+                            Icon(Icons.Default.Close, "Remove", Modifier.size(16.dp),
+                                tint = MaterialTheme.colorScheme.error)
+                        }
+                    }
+                }
+                Spacer(Modifier.height(4.dp))
+                FilledTonalButton(
+                    onClick = { safLauncher.launch(null) },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Icon(Icons.Default.Add, null, Modifier.size(16.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text("Add folder")
+                }
+            }
+
             // ── Save ──────────────────────────────────────────
             Button(
                 onClick = {
                     vm.save(token, chatId, wifiOnly, autoBackup, includeVideos,
                         intervalHours = intervalHours, requiresCharging = charging,
                         autoDeleteAfterBackup = autoDelete, themeMode = themeMode,
-                        includedAlbums = includedAlbums, updateUrl = updateUrl)
+                        includedAlbums = includedAlbums, updateUrl = updateUrl,
+                        biometricLock = biometricLock, safFolderUris = safFolderUris)
                     onBack()
                 },
                 modifier = Modifier.fillMaxWidth().height(52.dp),

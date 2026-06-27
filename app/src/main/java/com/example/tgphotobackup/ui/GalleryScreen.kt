@@ -68,7 +68,9 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import coil.compose.AsyncImage
 import coil.compose.SubcomposeAsyncImage
+import com.example.tgphotobackup.backup.ThumbnailCache
 import com.example.tgphotobackup.data.UploadedPhoto
 import com.example.tgphotobackup.data.contentUri
 import com.example.tgphotobackup.data.isVideo
@@ -103,11 +105,19 @@ fun GalleryScreen(
     var sortMode       by remember { mutableStateOf(SortMode.DATE_DESC) }
     var typeFilter     by remember { mutableStateOf(TypeFilter.ALL) }
     var showSortMenu   by remember { mutableStateOf(false) }
+    var selectedMonth  by remember { mutableStateOf<String?>(null) }
+    var showMonthMenu  by remember { mutableStateOf(false) }
+    val monthFmt       = remember { SimpleDateFormat("MMMM yyyy", Locale.getDefault()) }
     val context        = LocalContext.current
     val inSelectionMode = selectedHashes.isNotEmpty()
 
+    val availableMonths = remember(allPhotos) {
+        allPhotos.map { monthFmt.format(Date(it.uploadedAt)) }.distinct()
+            .sortedByDescending { runCatching { monthFmt.parse(it)?.time ?: 0L }.getOrDefault(0L) }
+    }
+
     // Apply sort + type filter to the full list
-    val displayPhotos = remember(allPhotos, sortMode, typeFilter) {
+    val displayPhotos = remember(allPhotos, sortMode, typeFilter, selectedMonth) {
         allPhotos
             .filter { photo ->
                 when (typeFilter) {
@@ -115,6 +125,9 @@ fun GalleryScreen(
                     TypeFilter.VIDEOS ->  photo.isVideo()
                     TypeFilter.ALL    ->  true
                 }
+            }
+            .filter { photo ->
+                selectedMonth == null || monthFmt.format(Date(photo.uploadedAt)) == selectedMonth
             }
             .let { list ->
                 when (sortMode) {
@@ -209,6 +222,26 @@ fun GalleryScreen(
                         onClick  = { typeFilter = filter },
                         label    = { Text(filter.label, style = MaterialTheme.typography.labelMedium) }
                     )
+                }
+                Box {
+                    FilterChip(
+                        selected = selectedMonth != null,
+                        onClick = { showMonthMenu = true },
+                        label = { Text(selectedMonth ?: "Month", style = MaterialTheme.typography.labelMedium) }
+                    )
+                    DropdownMenu(showMonthMenu, { showMonthMenu = false }) {
+                        DropdownMenuItem(text = { Text("All months") },
+                            onClick = { selectedMonth = null; showMonthMenu = false })
+                        availableMonths.forEach { month ->
+                            DropdownMenuItem(
+                                text = { Text(month) },
+                                onClick = { selectedMonth = month; showMonthMenu = false },
+                                leadingIcon = if (selectedMonth == month) {
+                                    { Icon(Icons.Default.Check, null, Modifier.size(16.dp)) }
+                                } else null
+                            )
+                        }
+                    }
                 }
             }
 
@@ -442,26 +475,36 @@ private fun Thumbnail(
             modifier = Modifier.fillMaxSize(),
             contentScale = ContentScale.Crop,
             error = {
-                Box(
-                    Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surfaceVariant),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        modifier = Modifier.padding(4.dp)
+                val thumbFile = ThumbnailCache.file(LocalContext.current, photo.contentHash)
+                if (thumbFile.exists()) {
+                    AsyncImage(
+                        model = thumbFile,
+                        contentDescription = photo.displayName,
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Crop
+                    )
+                } else {
+                    Box(
+                        Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surfaceVariant),
+                        contentAlignment = Alignment.Center
                     ) {
-                        Icon(Icons.Default.CloudOff, null, Modifier.size(20.dp),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f))
-                        Text(
-                            photo.displayName,
-                            fontSize = 7.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis,
-                            textAlign = TextAlign.Center,
-                            style = MaterialTheme.typography.labelSmall,
-                            modifier = Modifier.padding(top = 2.dp)
-                        )
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            modifier = Modifier.padding(4.dp)
+                        ) {
+                            Icon(Icons.Default.CloudOff, null, Modifier.size(20.dp),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f))
+                            Text(
+                                photo.displayName,
+                                fontSize = 7.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis,
+                                textAlign = TextAlign.Center,
+                                style = MaterialTheme.typography.labelSmall,
+                                modifier = Modifier.padding(top = 2.dp)
+                            )
+                        }
                     }
                 }
             }

@@ -17,6 +17,7 @@ import com.example.tgphotobackup.backup.NetworkChecker
 import com.example.tgphotobackup.data.AppDatabase
 import com.example.tgphotobackup.data.AppSettings
 import com.example.tgphotobackup.data.BackupRun
+import com.example.tgphotobackup.data.FailedUpload
 import com.example.tgphotobackup.data.SettingsRepository
 import com.example.tgphotobackup.data.UploadedPhoto
 import com.example.tgphotobackup.data.contentUri
@@ -75,6 +76,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     private val settingsRepo = SettingsRepository(app)
     private val dao          = AppDatabase.get(app).uploadedPhotoDao()
+    private val failedDao    = AppDatabase.get(app).failedUploadDao()
     private val workManager  = WorkManager.getInstance(app)
 
     val settings = settingsRepo.settings.stateIn(
@@ -113,6 +115,16 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     private val _shareStatus = MutableStateFlow<String?>(null)
     val shareStatus = _shareStatus.asStateFlow()
+
+    private val _failedUploads = MutableStateFlow<List<FailedUpload>>(emptyList())
+    val failedUploads = _failedUploads.asStateFlow()
+
+    val failedCount: kotlinx.coroutines.flow.StateFlow<Int> =
+        failedDao.countFlow()
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0)
+
+    private val _bulkRestoreStatus = MutableStateFlow<String?>(null)
+    val bulkRestoreStatus = _bulkRestoreStatus.asStateFlow()
 
     // Duplicate groups: photos sharing the same contentHash
     val duplicates: kotlinx.coroutines.flow.StateFlow<List<List<UploadedPhoto>>> =
@@ -174,6 +186,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             _recentUploads.value     = dao.recent()
             _allBackedUpPhotos.value = backed
             _backupRuns.value        = runs
+            _failedUploads.value     = failedDao.getAll()
             _stats.value = LibraryStats(
                 totalOnDevice  = onDevice,
                 totalBackedUp  = backed.size,
@@ -196,13 +209,16 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         autoDeleteAfterBackup: Boolean = false,
         themeMode: Int = 0,
         includedAlbums: Set<String> = emptySet(),
-        updateUrl: String = ""
+        updateUrl: String = "",
+        biometricLock: Boolean = false,
+        safFolderUris: Set<String> = emptySet()
     ) {
         viewModelScope.launch {
             settingsRepo.save(
                 botToken, chatId, wifiOnly, autoBackup, includeVideos,
                 maxFileSizeMb, intervalHours, requiresCharging,
-                autoDeleteAfterBackup, themeMode, includedAlbums, updateUrl
+                autoDeleteAfterBackup, themeMode, includedAlbums, updateUrl,
+                biometricLock, safFolderUris
             )
             BackupScheduler.setPeriodic(getApplication(), autoBackup, wifiOnly,
                 intervalHours, requiresCharging)
@@ -297,6 +313,65 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun clearRestoreStatus() { _restoreStatus.value = null }
+
+    // ── Retry queue (failed uploads) ───────────────────────────────────────────
+
+    /** Re-runs the backup; succeeded files clear their failure record automatically. */
+    fun retryFailed() = runBackup()
+
+    fun clearAllFailed() {
+        viewModelScope.launch(Dispatchers.IO) {
+            failedDao.clear()
+            _failedUploads.value = emptyList()
+        }
+    }
+
+    // ── Bulk restore ───────────────────────────────────────────────────────────
+
+    fun bulkRestore(context: Context) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val photos = dao.getAll()
+            if (photos.isEmpty()) { _bulkRestoreStatus.value = "Nothing to restore"; return@launch }
+            val s = settingsRepo.settings.first()
+            val client = TelegramClient(s.botToken)
+            var restored = 0; var failed = 0
+            photos.forEachIndexed { i, photo ->
+                _bulkRestoreStatus.value = "Restoring ${i + 1}/${photos.size}…"
+                runCatching {
+                    val filePath = client.getFilePath(photo.fileId).getOrThrow()
+                    val data = client.downloadBytes(filePath).getOrThrow()
+                    if (saveToGallery(context, photo.displayName, photo.mimeType, data)) restored++ else failed++
+                }.onFailure { failed++ }
+            }
+            _bulkRestoreStatus.value = "Restored $restored files" +
+                if (failed > 0) " · $failed failed" else ""
+            refreshStats()
+        }
+    }
+
+    fun clearBulkRestoreStatus() { _bulkRestoreStatus.value = null }
+
+    // ── One-tap duplicate cleaner ──────────────────────────────────────────────
+
+    fun deleteAllDuplicates() {
+        viewModelScope.launch(Dispatchers.IO) {
+            val app = getApplication<Application>()
+            val groups = _allBackedUpPhotos.value
+                .groupBy { it.contentHash }
+                .values.filter { it.size > 1 }
+            var freed = 0L
+            groups.forEach { group ->
+                // keep the first (oldest uploaded), delete the rest from device and DB
+                group.drop(1).forEach { photo ->
+                    runCatching { app.contentResolver.delete(photo.contentUri(), null, null) }
+                    dao.deleteByMediaId(photo.mediaId)
+                    freed += photo.sizeBytes
+                }
+            }
+            if (freed > 0) _connectionResult.value = "Removed duplicates, freed ${formatBytes(freed)}"
+            refreshStats()
+        }
+    }
 
     // ── Share (works even when local file is deleted) ──────────────────────────
 
