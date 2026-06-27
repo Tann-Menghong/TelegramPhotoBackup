@@ -81,6 +81,7 @@ fun PhotoDetailScreen(
         scale = 1f; offsetX = 0f; offsetY = 0f
         vm.clearShareStatus()
         vm.clearPlayStatus()
+        if (currentPhoto.isVideo()) vm.playVideo(currentPhoto, context)
     }
 
     Box(Modifier.fillMaxSize().background(Color.Black)) {

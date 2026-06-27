@@ -31,6 +31,7 @@ import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -422,9 +423,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     private val _playStatus = MutableStateFlow<String?>(null)
     val playStatus = _playStatus.asStateFlow()
+    private var playJob: Job? = null
 
     fun playVideo(photo: UploadedPhoto, context: android.content.Context) {
-        viewModelScope.launch(Dispatchers.IO) {
+        playJob?.cancel()
+        _playStatus.value = null
+        playJob = viewModelScope.launch(Dispatchers.IO) {
             _playStatus.value = "Preparing video…"
             val uri = downloadToShareCache(context, photo)
             if (uri != null) {
@@ -441,7 +445,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun clearPlayStatus() { _playStatus.value = null }
+    fun clearPlayStatus() { playJob?.cancel(); _playStatus.value = null }
 
     private suspend fun downloadToShareCache(
         context: android.content.Context,
