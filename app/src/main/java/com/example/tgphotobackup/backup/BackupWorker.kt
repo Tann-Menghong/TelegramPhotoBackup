@@ -27,9 +27,17 @@ class BackupWorker(
         setForeground(foregroundInfo(0, 0, "Starting…", 0, 0))
         return try {
             val settings  = SettingsRepository(applicationContext).settings.first()
+            val isManual  = inputData.getBoolean(BackupScheduler.KEY_IS_MANUAL, false)
+
+            // Periodic job triggered for a non-Pro user (upgraded from v1.50) — cancel and stop
+            if (!isManual && !settings.isPro) {
+                BackupScheduler.setPeriodic(applicationContext, false, settings.wifiOnly)
+                return Result.success()
+            }
+
             val startedAt = System.currentTimeMillis()
             val summary   = BackupManager(applicationContext).backup(
-                includeVideos = settings.includeVideos
+                includeVideos = settings.includeVideos && settings.isPro
             ) { done, total, name, speedBps, etaSec ->
                 setForeground(foregroundInfo(done, total, name, speedBps, etaSec))
                 setProgress(workDataOf(

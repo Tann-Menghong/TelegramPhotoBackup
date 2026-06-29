@@ -120,7 +120,7 @@ class BackupManager(private val context: Context) {
                 runCatching { failedDao.deleteByMediaId(photo.id) }
                 ThumbnailCache.save(context, photo.id, photo.mime, hash)
 
-                if (settings.autoDeleteAfterBackup) {
+                if (settings.autoDeleteAfterBackup && settings.isPro) {
                     runCatching { context.contentResolver.delete(photo.uri, null, null) }
                 }
 

@@ -386,7 +386,7 @@ private fun HomeScreen(vm: MainViewModel) {
         !pm.isIgnoringBatteryOptimizations(context.packageName)
 
     val progress = if (stats.totalOnDevice > 0)
-        stats.totalBackedUp.toFloat() / stats.totalOnDevice else 0f
+        (stats.totalBackedUp.toFloat() / stats.totalOnDevice).coerceIn(0f, 1f) else 0f
 
     Column(
         modifier = Modifier
@@ -467,7 +467,7 @@ private fun HomeScreen(vm: MainViewModel) {
                             style = MaterialTheme.typography.titleSmall,
                             fontWeight = FontWeight.SemiBold,
                             color = MaterialTheme.colorScheme.onSecondaryContainer)
-                        Text("Delete photos from backup in Gallery · Fix failed-upload notifications · Skip files >50 MB",
+                        Text("Pro version added · Auto-backup, video backup, auto-delete & extra folders · tap ⭐ to upgrade",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.8f))
                     }

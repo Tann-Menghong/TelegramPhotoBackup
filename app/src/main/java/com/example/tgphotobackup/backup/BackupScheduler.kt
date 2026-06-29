@@ -8,6 +8,7 @@ import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
+import androidx.work.workDataOf
 import java.util.concurrent.TimeUnit
 
 object BackupScheduler {
@@ -22,8 +23,11 @@ object BackupScheduler {
         .setRequiresCharging(requiresCharging)
         .build()
 
+    const val KEY_IS_MANUAL = "is_manual"
+
     fun runNow(context: Context, wifiOnly: Boolean) {
         val req = OneTimeWorkRequestBuilder<BackupWorker>()
+            .setInputData(workDataOf(KEY_IS_MANUAL to true))
             .setConstraints(constraints(wifiOnly, requiresCharging = false))
             .build()
         WorkManager.getInstance(context)
