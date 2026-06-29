@@ -21,13 +21,20 @@ data class AppSettings(
     val autoBackupIntervalHours: Int = 12,
     val requiresCharging: Boolean = false,
     val autoDeleteAfterBackup: Boolean = false,
-    val themeMode: Int = 0,              // 0=system, 1=light, 2=dark
-    val includedAlbums: Set<String> = emptySet(),  // empty = all albums
+    val themeMode: Int = 0,
+    val includedAlbums: Set<String> = emptySet(),
     val updateUrl: String = "https://github.com/Tann-Menghong/TelegramPhotoBackup",
     val biometricLock: Boolean = false,
     val safFolderUris: Set<String> = emptySet(),
+    // Pro
     val licenseKey: String = "",
-    val isPro: Boolean = false
+    val isPro: Boolean = false,
+    val proExpiresAt: String = "",
+    // Pro Max
+    val proMaxKey: String = "",
+    val isProMax: Boolean = false,
+    val encryptBackup: Boolean = false,
+    val autoIndexBackup: Boolean = false
 ) {
     val isConfigured: Boolean get() = botToken.isNotBlank() && chatId.isNotBlank()
     val maxFileSizeBytes: Long get() = maxFileSizeMb.toLong() * 1024 * 1024
@@ -36,7 +43,12 @@ data class AppSettings(
 class SettingsRepository(private val context: Context) {
 
     val settings: Flow<AppSettings> = context.dataStore.data.map { p ->
-        val licKey = p[PRO_KEY] ?: ""
+        val licKey  = p[PRO_KEY] ?: ""
+        val maxKey  = p[PRO_MAX_KEY] ?: ""
+        val licType = ProManager.validate(licKey)
+        val maxType = ProManager.validate(maxKey)
+        val proActive = ProManager.isProActive(licType)
+        val maxActive = ProManager.isProMaxActive(maxType)
         AppSettings(
             botToken                = p[BOT_TOKEN] ?: "",
             chatId                  = p[CHAT_ID] ?: "",
@@ -51,15 +63,23 @@ class SettingsRepository(private val context: Context) {
             includedAlbums          = p[INCLUDED_ALBUMS]?.let { s ->
                 if (s.isBlank()) emptySet() else s.split(",").toSet()
             } ?: emptySet(),
-            updateUrl               = p[UPDATE_URL]
-                                        ?.takeIf { it.isNotBlank() }
+            updateUrl               = p[UPDATE_URL]?.takeIf { it.isNotBlank() }
                                         ?: "https://github.com/Tann-Menghong/TelegramPhotoBackup",
             biometricLock           = p[BIOMETRIC_LOCK] ?: false,
             safFolderUris           = p[INCLUDED_SAF_FOLDERS]?.let { s ->
                 if (s.isBlank()) emptySet() else s.split("\n").filter { it.isNotBlank() }.toSet()
             } ?: emptySet(),
             licenseKey              = licKey,
-            isPro                   = licKey.isNotBlank() && ProManager.validate(licKey)
+            isPro                   = proActive || maxActive,
+            proExpiresAt            = when {
+                maxActive   -> ProManager.expiryLabel(maxType)
+                proActive   -> ProManager.expiryLabel(licType)
+                else        -> ""
+            },
+            proMaxKey               = maxKey,
+            isProMax                = maxActive,
+            encryptBackup           = (p[ENCRYPT_BACKUP] ?: false) && maxActive,
+            autoIndexBackup         = (p[AUTO_INDEX_BACKUP] ?: false) && maxActive
         )
     }
 
@@ -77,28 +97,36 @@ class SettingsRepository(private val context: Context) {
         includedAlbums: Set<String> = emptySet(),
         updateUrl: String = "",
         biometricLock: Boolean = false,
-        safFolderUris: Set<String> = emptySet()
+        safFolderUris: Set<String> = emptySet(),
+        encryptBackup: Boolean = false,
+        autoIndexBackup: Boolean = false
     ) {
         context.dataStore.edit { p ->
-            p[BOT_TOKEN]                 = botToken.trim()
-            p[CHAT_ID]                   = chatId.trim()
-            p[WIFI_ONLY]                 = wifiOnly
-            p[AUTO_BACKUP]               = autoBackup
-            p[INCLUDE_VIDEOS]            = includeVideos
-            p[MAX_FILE_SIZE_MB]          = maxFileSizeMb.coerceIn(1, 50)
+            p[BOT_TOKEN]                  = botToken.trim()
+            p[CHAT_ID]                    = chatId.trim()
+            p[WIFI_ONLY]                  = wifiOnly
+            p[AUTO_BACKUP]                = autoBackup
+            p[INCLUDE_VIDEOS]             = includeVideos
+            p[MAX_FILE_SIZE_MB]           = maxFileSizeMb.coerceIn(1, 50)
             p[AUTO_BACKUP_INTERVAL_HOURS] = autoBackupIntervalHours
-            p[REQUIRES_CHARGING]         = requiresCharging
-            p[AUTO_DELETE_AFTER_BACKUP]  = autoDeleteAfterBackup
-            p[THEME_MODE]                = themeMode
-            p[INCLUDED_ALBUMS]           = includedAlbums.joinToString(",")
-            p[UPDATE_URL]                = updateUrl.trim()
-            p[BIOMETRIC_LOCK]            = biometricLock
-            p[INCLUDED_SAF_FOLDERS]      = safFolderUris.joinToString("\n")
+            p[REQUIRES_CHARGING]          = requiresCharging
+            p[AUTO_DELETE_AFTER_BACKUP]   = autoDeleteAfterBackup
+            p[THEME_MODE]                 = themeMode
+            p[INCLUDED_ALBUMS]            = includedAlbums.joinToString(",")
+            p[UPDATE_URL]                 = updateUrl.trim()
+            p[BIOMETRIC_LOCK]             = biometricLock
+            p[INCLUDED_SAF_FOLDERS]       = safFolderUris.joinToString("\n")
+            p[ENCRYPT_BACKUP]             = encryptBackup
+            p[AUTO_INDEX_BACKUP]          = autoIndexBackup
         }
     }
 
     suspend fun savePro(key: String) {
         context.dataStore.edit { p -> p[PRO_KEY] = key.trim() }
+    }
+
+    suspend fun saveProMax(key: String) {
+        context.dataStore.edit { p -> p[PRO_MAX_KEY] = key.trim() }
     }
 
     companion object {
@@ -117,5 +145,8 @@ class SettingsRepository(private val context: Context) {
         private val BIOMETRIC_LOCK             = booleanPreferencesKey("biometric_lock")
         private val INCLUDED_SAF_FOLDERS       = stringPreferencesKey("included_saf_folders")
         private val PRO_KEY                    = stringPreferencesKey("pro_key")
+        private val PRO_MAX_KEY                = stringPreferencesKey("pro_max_key")
+        private val ENCRYPT_BACKUP             = booleanPreferencesKey("encrypt_backup")
+        private val AUTO_INDEX_BACKUP          = booleanPreferencesKey("auto_index_backup")
     }
 }

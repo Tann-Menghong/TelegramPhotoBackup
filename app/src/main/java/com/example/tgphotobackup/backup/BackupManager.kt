@@ -10,6 +10,14 @@ import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.first
 import java.security.MessageDigest
+import javax.crypto.SecretKey
+
+private data class UploadSpec(
+    val name: String,
+    val mime: String,
+    val bytes: ByteArray?,
+    val length: Long
+)
 
 data class BackupSummary(
     val total: Int,
@@ -38,7 +46,9 @@ class BackupManager(private val context: Context) {
         val settings = settingsRepo.settings.first()
         check(settings.isConfigured) { "Bot token / chat id not set" }
 
-        val client = TelegramClient(settings.botToken)
+        val client    = TelegramClient(settings.botToken)
+        val encKey: SecretKey? = if (settings.encryptBackup && settings.isProMax)
+            EncryptionManager.deriveKey(settings.botToken) else null
 
         val mediaStoreMedia = MediaStoreScanner.queryAll(context, includeVideos)
             .filter { it.size > 0 }
@@ -90,20 +100,35 @@ class BackupManager(private val context: Context) {
                     skipped++; return@forEachIndexed
                 }
 
+                val (uploadName, uploadMime, uploadBytes, uploadLength) = if (encKey != null) {
+                    val raw = context.contentResolver.openInputStream(photo.uri)?.readBytes()
+                        ?: throw IllegalStateException("Cannot open ${photo.uri}")
+                    val enc = EncryptionManager.encrypt(raw, encKey)
+                    UploadSpec(
+                        EncryptionManager.encryptedName(photo.displayName),
+                        "application/octet-stream",
+                        enc,
+                        enc.size.toLong()
+                    )
+                } else {
+                    UploadSpec(photo.displayName, photo.mime, null, photo.size)
+                }
+
                 val res = client.sendDocument(
                     chatId   = settings.chatId,
-                    fileName = photo.displayName,
-                    mime     = photo.mime,
-                    length   = photo.size,
-                    caption  = photo.displayName
+                    fileName = uploadName,
+                    mime     = uploadMime,
+                    length   = uploadLength,
+                    caption  = uploadName
                 ) {
-                    context.contentResolver.openInputStream(photo.uri)
+                    uploadBytes?.inputStream()
+                        ?: context.contentResolver.openInputStream(photo.uri)
                         ?: throw IllegalStateException("Cannot open ${photo.uri}")
                 }
                 dao.insert(UploadedPhoto(
                     contentHash  = hash,
                     mediaId      = photo.id,
-                    displayName  = photo.displayName,
+                    displayName  = uploadName,
                     sizeBytes    = photo.size,
                     dateModified = photo.dateModified,
                     messageId    = res.messageId,

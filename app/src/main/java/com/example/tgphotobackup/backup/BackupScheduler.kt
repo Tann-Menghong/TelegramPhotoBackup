@@ -14,6 +14,7 @@ import java.util.concurrent.TimeUnit
 object BackupScheduler {
     const val UNIQUE_ONE_TIME = "backup_now"
     const val UNIQUE_PERIODIC = "backup_periodic"
+    const val UNIQUE_INDEX    = "auto_index"
 
     private fun constraints(
         wifiOnly: Boolean,
@@ -32,6 +33,17 @@ object BackupScheduler {
             .build()
         WorkManager.getInstance(context)
             .enqueueUniqueWork(UNIQUE_ONE_TIME, ExistingWorkPolicy.KEEP, req)
+    }
+
+    fun setAutoIndex(context: Context, enabled: Boolean) {
+        val wm = WorkManager.getInstance(context)
+        if (!enabled) { wm.cancelUniqueWork(UNIQUE_INDEX); return }
+        val req = PeriodicWorkRequestBuilder<IndexBackupWorker>(24, TimeUnit.HOURS)
+            .setConstraints(Constraints.Builder()
+                .setRequiredNetworkType(NetworkType.CONNECTED)
+                .build())
+            .build()
+        wm.enqueueUniquePeriodicWork(UNIQUE_INDEX, ExistingPeriodicWorkPolicy.UPDATE, req)
     }
 
     fun setPeriodic(

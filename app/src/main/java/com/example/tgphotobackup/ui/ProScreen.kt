@@ -17,19 +17,26 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.AllInbox
 import androidx.compose.material.icons.filled.AutoDelete
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.IosShare
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.Schedule
+import androidx.compose.material.icons.filled.Security
+import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.SyncAlt
 import androidx.compose.material.icons.filled.VerifiedUser
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.filled.WorkspacePremium
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CenterAlignedTopAppBar
@@ -53,6 +60,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
@@ -64,10 +72,14 @@ import com.example.tgphotobackup.R
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ProScreen(vm: MainViewModel, onBack: () -> Unit) {
-    val isPro by vm.isPro.collectAsState()
+    val isPro       by vm.isPro.collectAsState()
+    val isProMax    by vm.isProMax.collectAsState()
+    val proExpiresAt by vm.proExpiresAt.collectAsState()
 
-    var keyInput      by remember { mutableStateOf("") }
-    var activateState by remember { mutableStateOf<Boolean?>(null) }
+    var proKeyInput     by remember { mutableStateOf("") }
+    var proActivate     by remember { mutableStateOf<Boolean?>(null) }
+    var maxKeyInput     by remember { mutableStateOf("") }
+    var maxActivate     by remember { mutableStateOf<Boolean?>(null) }
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
@@ -76,11 +88,17 @@ fun ProScreen(vm: MainViewModel, onBack: () -> Unit) {
                 title = {
                     Row(verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Icon(Icons.Default.WorkspacePremium, null,
-                            tint = MaterialTheme.colorScheme.primary)
-                        Text("TG Backup Pro",
+                        Icon(
+                            if (isProMax) Icons.Default.AutoAwesome
+                            else Icons.Default.WorkspacePremium,
+                            null,
+                            tint = if (isProMax) Color(0xFFFFB300) else MaterialTheme.colorScheme.primary
+                        )
+                        Text(
+                            if (isProMax) "TG Backup Pro Max" else "TG Backup Pro",
                             style = MaterialTheme.typography.titleLarge,
-                            fontWeight = FontWeight.SemiBold)
+                            fontWeight = FontWeight.SemiBold
+                        )
                     }
                 },
                 navigationIcon = {
@@ -101,69 +119,69 @@ fun ProScreen(vm: MainViewModel, onBack: () -> Unit) {
                 .padding(horizontal = 20.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // ── Hero ─────────────────────────────────────────────
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(24.dp))
-                    .background(
-                        Brush.linearGradient(
-                            listOf(
-                                MaterialTheme.colorScheme.primaryContainer,
-                                MaterialTheme.colorScheme.tertiaryContainer
-                            )
-                        )
-                    )
-                    .padding(28.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Icon(
-                        if (isPro) Icons.Default.VerifiedUser else Icons.Default.WorkspacePremium,
-                        null,
-                        modifier = Modifier.size(56.dp),
-                        tint = MaterialTheme.colorScheme.onPrimaryContainer
-                    )
-                    Text(
-                        if (isPro) "Pro Active" else "Upgrade to Pro",
-                        style = MaterialTheme.typography.headlineSmall,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onPrimaryContainer
-                    )
-                    Text(
-                        if (isPro) "Thank you for your support!"
-                        else "One-time payment · No subscription",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f),
-                        textAlign = TextAlign.Center
-                    )
-                }
-            }
+            // ── Status banner ───────────────────────────────────────────────
+            HeroBanner(isPro, isProMax, proExpiresAt)
 
-            // ── Features ──────────────────────────────────────────
-            ProFeaturesCard(isPro)
+            // ── Feature comparison ──────────────────────────────────────────
+            FeaturesCard(isPro, isProMax)
 
-            if (!isPro) {
-                // ── Price ──────────────────────────────────────────
-                PriceCard()
-
-                // ── How to pay ─────────────────────────────────────
-                PaymentCard()
-
-                // ── ABA QR ─────────────────────────────────────────
+            // ── Pro monthly section ─────────────────────────────────────────
+            if (!isProMax) {
+                SectionHeader("PRO — \$5 USD / month")
+                ProPriceCard()
+                PaymentCard(
+                    amount = "\$5 USD",
+                    memo   = "TG Pro",
+                    steps  = listOf(
+                        "Open ABA Mobile app",
+                        "Scan the QR below or transfer to account",
+                        "Amount: \$5 USD",
+                        "Memo / note: \"TG Pro\"",
+                        "Email receipt to: menghong@aeu.edu.kh",
+                        "Receive license key within 24 hours"
+                    )
+                )
                 QrCard()
+                KeyEntryCard(
+                    title         = if (isPro) "PRO LICENSE ACTIVE" else "ENTER PRO KEY",
+                    placeholder   = "PROM-YYYYMM-XXXX-CCCC",
+                    isActive      = isPro,
+                    activeLabel   = "Pro is active · $proExpiresAt",
+                    keyInput      = proKeyInput,
+                    onKeyChange   = { proKeyInput = it; proActivate = null },
+                    activateState = proActivate,
+                    onActivate    = { proActivate = vm.unlockPro(proKeyInput.trim()) },
+                    buttonLabel   = "Activate Pro"
+                )
             }
 
-            // ── Key entry ─────────────────────────────────────────
-            LicenseKeyCard(
-                isPro        = isPro,
-                keyInput     = keyInput,
-                onKeyChange  = { keyInput = it; activateState = null },
-                activateState = activateState,
-                onActivate   = { activateState = vm.unlockPro(keyInput.trim()) }
+            // ── Pro Max lifetime section ────────────────────────────────────
+            SectionHeader("PRO MAX — \$15 USD · Lifetime")
+            MaxPriceCard()
+            PaymentCard(
+                amount = "\$15 USD",
+                memo   = "TG Max",
+                steps  = listOf(
+                    "Open ABA Mobile app",
+                    "Scan the QR below or transfer to account",
+                    "Amount: \$15 USD",
+                    "Memo / note: \"TG Max\"",
+                    "Email receipt to: menghong@aeu.edu.kh",
+                    "Receive lifetime license key within 24 hours"
+                )
+            )
+            if (!isProMax) QrCard()
+            KeyEntryCard(
+                title         = if (isProMax) "PRO MAX LICENSE ACTIVE" else "ENTER PRO MAX KEY",
+                placeholder   = "PMAX-XXXX-XXXX-CCCC",
+                isActive      = isProMax,
+                activeLabel   = "Pro Max is active · Lifetime",
+                keyInput      = maxKeyInput,
+                onKeyChange   = { maxKeyInput = it; maxActivate = null },
+                activateState = maxActivate,
+                onActivate    = { maxActivate = vm.unlockProMax(maxKeyInput.trim()) },
+                buttonLabel   = "Activate Pro Max",
+                buttonColor   = Color(0xFFFFB300)
             )
 
             Spacer(Modifier.height(16.dp))
@@ -171,105 +189,177 @@ fun ProScreen(vm: MainViewModel, onBack: () -> Unit) {
     }
 }
 
-// ── Features list ─────────────────────────────────────────────────────────────
+// ── Hero ────────────────────────────────────────────────────────────────────
 
 @Composable
-private fun ProFeaturesCard(isPro: Boolean) {
+private fun HeroBanner(isPro: Boolean, isProMax: Boolean, proExpiresAt: String) {
+    val (icon, headline, sub, brush) = when {
+        isProMax -> Quadruple(
+            Icons.Default.AutoAwesome,
+            "Pro Max Active",
+            "All features unlocked · Lifetime",
+            Brush.linearGradient(listOf(Color(0xFFFFB300), Color(0xFFFF6F00)))
+        )
+        isPro -> Quadruple(
+            Icons.Default.VerifiedUser,
+            "Pro Active",
+            proExpiresAt.ifBlank { "Pro features unlocked" },
+            Brush.linearGradient(listOf(
+                Color(0xFF1565C0), Color(0xFF0288D1)
+            ))
+        )
+        else -> Quadruple(
+            Icons.Default.WorkspacePremium,
+            "Upgrade Your Backup",
+            "Choose Pro or Pro Max below",
+            Brush.linearGradient(listOf(
+                Color(0xFF4A148C), Color(0xFF7B1FA2)
+            ))
+        )
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(24.dp))
+            .background(brush)
+            .padding(28.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Icon(icon, null, modifier = Modifier.size(56.dp), tint = Color.White)
+            Text(headline, style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.Bold, color = Color.White)
+            Text(sub, style = MaterialTheme.typography.bodyMedium,
+                color = Color.White.copy(alpha = 0.85f), textAlign = TextAlign.Center)
+        }
+    }
+}
+
+private data class Quadruple<A, B, C, D>(val a: A, val b: B, val c: C, val d: D)
+
+// ── Features table ──────────────────────────────────────────────────────────
+
+private enum class Tier { FREE, PRO, MAX }
+
+private data class Feature(
+    val icon: ImageVector,
+    val label: String,
+    val desc: String,
+    val tier: Tier
+)
+
+private val FEATURES = listOf(
+    Feature(Icons.Default.CloudUpload,   "Manual photo backup",       "Back up photos on demand",                  Tier.FREE),
+    Feature(Icons.Default.PhotoLibrary,  "Gallery & photo viewer",    "Browse and restore backed-up photos",       Tier.FREE),
+    Feature(Icons.Default.History,       "History & stats",           "Backup runs and storage usage",             Tier.FREE),
+    Feature(Icons.Default.Schedule,      "Auto-backup scheduling",    "Automatic backups every 6–24 h",            Tier.PRO),
+    Feature(Icons.Default.Videocam,      "Video backup",              "Include videos alongside photos",           Tier.PRO),
+    Feature(Icons.Default.AutoDelete,    "Auto-delete after backup",  "Free up local storage automatically",       Tier.PRO),
+    Feature(Icons.Default.Folder,        "Additional folders",        "Back up custom folders via file picker",    Tier.PRO),
+    Feature(Icons.Default.AllInbox,      "Bulk restore all photos",   "Restore your entire backup at once",        Tier.MAX),
+    Feature(Icons.Default.Security,      "Encrypted backup (AES-256)","Files encrypted before upload to Telegram", Tier.MAX),
+    Feature(Icons.Default.SyncAlt,       "Auto daily index backup",   "Upload backup index to Telegram every day", Tier.MAX),
+    Feature(Icons.Default.Share,         "Export backup report",      "Share a full log of all backed-up files",   Tier.MAX),
+)
+
+@Composable
+private fun FeaturesCard(isPro: Boolean, isProMax: Boolean) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(MaterialTheme.colorScheme.surface),
         elevation = CardDefaults.cardElevation(1.dp)
     ) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text("WHAT YOU GET", style = MaterialTheme.typography.labelSmall,
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text("FEATURES", style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(4.dp))
-            FeatureRow(Icons.Default.CloudUpload,  "Manual photo backup",    "Back up photos on demand",                  pro = false, unlocked = true)
-            HorizontalDivider(Modifier.padding(vertical = 2.dp))
-            FeatureRow(Icons.Default.PhotoLibrary, "Gallery & photo viewer", "Browse and restore backed-up photos",       pro = false, unlocked = true)
-            HorizontalDivider(Modifier.padding(vertical = 2.dp))
-            FeatureRow(Icons.Default.History,      "History & stats",        "Backup runs and storage usage",             pro = false, unlocked = true)
-            HorizontalDivider(Modifier.padding(vertical = 2.dp))
-            FeatureRow(Icons.Default.Schedule,     "Auto-backup scheduling", "Automatic backups every 6–24 h",            pro = true,  unlocked = isPro)
-            HorizontalDivider(Modifier.padding(vertical = 2.dp))
-            FeatureRow(Icons.Default.Videocam,     "Video backup",           "Include videos alongside photos",           pro = true,  unlocked = isPro)
-            HorizontalDivider(Modifier.padding(vertical = 2.dp))
-            FeatureRow(Icons.Default.AutoDelete,   "Auto-delete after backup","Free up local storage automatically",      pro = true,  unlocked = isPro)
-            HorizontalDivider(Modifier.padding(vertical = 2.dp))
-            FeatureRow(Icons.Default.Folder,       "Additional folders",     "Back up custom folders via file picker",    pro = true,  unlocked = isPro)
+            FEATURES.forEachIndexed { i, f ->
+                val unlocked = when (f.tier) {
+                    Tier.FREE -> true
+                    Tier.PRO  -> isPro || isProMax
+                    Tier.MAX  -> isProMax
+                }
+                FeatureRow(f, unlocked)
+                if (i < FEATURES.size - 1) HorizontalDivider(Modifier.padding(vertical = 2.dp))
+            }
         }
     }
 }
 
 @Composable
-private fun FeatureRow(
-    icon: ImageVector,
-    label: String,
-    desc: String,
-    pro: Boolean,
-    unlocked: Boolean
-) {
+private fun FeatureRow(f: Feature, unlocked: Boolean) {
     Row(
         Modifier.fillMaxWidth().padding(vertical = 6.dp, horizontal = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        Icon(icon, null, Modifier.size(20.dp),
-            tint = if (unlocked) MaterialTheme.colorScheme.primary
-                   else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f))
+        Icon(f.icon, null, Modifier.size(20.dp),
+            tint = if (unlocked) when (f.tier) {
+                Tier.MAX  -> Color(0xFFFFB300)
+                Tier.PRO  -> MaterialTheme.colorScheme.primary
+                else      -> MaterialTheme.colorScheme.primary
+            } else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f))
         Column(Modifier.weight(1f)) {
-            Text(label,
-                style = MaterialTheme.typography.bodyMedium,
+            Text(f.label, style = MaterialTheme.typography.bodyMedium,
                 fontWeight = FontWeight.Medium,
                 color = if (unlocked) MaterialTheme.colorScheme.onSurface
-                        else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f))
-            Text(desc,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = if (unlocked) 0.8f else 0.4f))
+                        else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f))
+            Text(f.desc, style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(
+                    alpha = if (unlocked) 0.8f else 0.35f))
         }
-        if (pro && !unlocked) {
-            Surface(shape = RoundedCornerShape(6.dp),
-                color = MaterialTheme.colorScheme.primaryContainer) {
-                Text("PRO",
-                    style = MaterialTheme.typography.labelSmall,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp))
-            }
-        } else {
-            Icon(Icons.Default.CheckCircle, null, Modifier.size(18.dp),
-                tint = if (unlocked) MaterialTheme.colorScheme.primary
-                       else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.15f))
+        when {
+            unlocked -> Icon(Icons.Default.CheckCircle, null, Modifier.size(18.dp),
+                tint = if (f.tier == Tier.MAX) Color(0xFFFFB300) else MaterialTheme.colorScheme.primary)
+            f.tier == Tier.MAX -> TierBadge("MAX", Color(0xFFFFB300))
+            f.tier == Tier.PRO -> TierBadge("PRO", MaterialTheme.colorScheme.primary)
+            else -> {}
         }
     }
 }
 
-// ── Price card ────────────────────────────────────────────────────────────────
+@Composable
+private fun TierBadge(label: String, color: Color) {
+    Surface(shape = RoundedCornerShape(6.dp),
+        color = color.copy(alpha = 0.15f)) {
+        Text(label, style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.Bold,
+            color = color,
+            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp))
+    }
+}
+
+// ── Section header ──────────────────────────────────────────────────────────
 
 @Composable
-private fun PriceCard() {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(16.dp),
+private fun SectionHeader(text: String) {
+    Text(text, style = MaterialTheme.typography.titleSmall,
+        fontWeight = FontWeight.Bold,
+        color = MaterialTheme.colorScheme.primary,
+        modifier = Modifier.padding(top = 4.dp, start = 2.dp))
+}
+
+// ── Price cards ─────────────────────────────────────────────────────────────
+
+@Composable
+private fun ProPriceCard() {
+    Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(MaterialTheme.colorScheme.primaryContainer),
-        elevation = CardDefaults.cardElevation(0.dp)
-    ) {
-        Row(
-            Modifier.padding(20.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(16.dp)
-        ) {
-            Text("$",
-                style = MaterialTheme.typography.displaySmall,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.primary)
+        elevation = CardDefaults.cardElevation(0.dp)) {
+        Row(Modifier.padding(20.dp), verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+            Text("$", style = MaterialTheme.typography.displaySmall,
+                fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
             Column {
-                Text("5 USD",
-                    style = MaterialTheme.typography.headlineSmall,
+                Text("5 USD / month", style = MaterialTheme.typography.headlineSmall,
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.onPrimaryContainer)
-                Text("One-time payment · Lifetime Pro access",
+                Text("Renew every month · 4 Pro features",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f))
             }
@@ -277,39 +367,44 @@ private fun PriceCard() {
     }
 }
 
-// ── Payment instructions ──────────────────────────────────────────────────────
+@Composable
+private fun MaxPriceCard() {
+    Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp))
+        .background(Brush.linearGradient(listOf(Color(0xFFFFB300), Color(0xFFFF6F00))))
+        .padding(20.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+            Text("$", style = MaterialTheme.typography.displaySmall,
+                fontWeight = FontWeight.Bold, color = Color.White)
+            Column {
+                Text("15 USD · Lifetime", style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.Bold, color = Color.White)
+                Text("Pay once, use forever · 8 Pro Max features",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Color.White.copy(alpha = 0.9f))
+            }
+        }
+    }
+}
+
+// ── Payment instructions ─────────────────────────────────────────────────────
 
 @Composable
-private fun PaymentCard() {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(16.dp),
+private fun PaymentCard(amount: String, memo: String, steps: List<String>) {
+    Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(MaterialTheme.colorScheme.surface),
-        elevation = CardDefaults.cardElevation(1.dp)
-    ) {
+        elevation = CardDefaults.cardElevation(1.dp)) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text("HOW TO PAY", style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
-
-            val steps = listOf(
-                "1" to "Open ABA Mobile app",
-                "2" to "Scan the QR below, or transfer to:",
-                "3" to "Amount: \$5 USD",
-                "4" to "Memo / note: \"TG Pro\"",
-                "5" to "Email receipt to:\nmenghong@aeu.edu.kh",
-                "6" to "Receive your license key within 24 hours"
-            )
-            steps.forEach { (num, step) ->
-                Row(Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+            steps.forEachIndexed { i, step ->
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp),
                     verticalAlignment = Alignment.Top) {
-                    Surface(
-                        shape = RoundedCornerShape(8.dp),
+                    Surface(shape = RoundedCornerShape(8.dp),
                         color = MaterialTheme.colorScheme.primaryContainer,
-                        modifier = Modifier.size(24.dp)
-                    ) {
+                        modifier = Modifier.size(24.dp)) {
                         Box(contentAlignment = Alignment.Center) {
-                            Text(num, style = MaterialTheme.typography.labelSmall,
+                            Text("${i + 1}", style = MaterialTheme.typography.labelSmall,
                                 fontWeight = FontWeight.Bold,
                                 color = MaterialTheme.colorScheme.primary)
                         }
@@ -319,12 +414,9 @@ private fun PaymentCard() {
                         modifier = Modifier.weight(1f))
                 }
             }
-
             HorizontalDivider(Modifier.padding(vertical = 4.dp))
-
             Text("ABA BANK ACCOUNT", style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
-
             AccountRow("Account name", "MENGHONG TANN")
             AccountRow("USD account",  "500 090 709")
             AccountRow("KHR account",  "006 662 997")
@@ -334,8 +426,7 @@ private fun PaymentCard() {
 
 @Composable
 private fun AccountRow(label: String, value: String) {
-    Row(Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically) {
         Text(label, style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -345,29 +436,22 @@ private fun AccountRow(label: String, value: String) {
     }
 }
 
-// ── QR code ───────────────────────────────────────────────────────────────────
+// ── QR code ──────────────────────────────────────────────────────────────────
 
 @Composable
 private fun QrCard() {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(16.dp),
+    Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(MaterialTheme.colorScheme.surface),
-        elevation = CardDefaults.cardElevation(1.dp)
-    ) {
-        Column(
-            Modifier.padding(16.dp),
+        elevation = CardDefaults.cardElevation(1.dp)) {
+        Column(Modifier.padding(16.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
+            verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("ABA KHQR", style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
             AsyncImage(
                 model = R.drawable.aba_qr,
                 contentDescription = "ABA Bank QR Code",
-                modifier = Modifier
-                    .size(220.dp)
-                    .clip(RoundedCornerShape(12.dp)),
+                modifier = Modifier.size(220.dp).clip(RoundedCornerShape(12.dp)),
                 contentScale = ContentScale.Fit
             )
             Text("Scan with ABA Mobile to pay",
@@ -380,36 +464,36 @@ private fun QrCard() {
 // ── License key entry ─────────────────────────────────────────────────────────
 
 @Composable
-private fun LicenseKeyCard(
-    isPro: Boolean,
+private fun KeyEntryCard(
+    title: String,
+    placeholder: String,
+    isActive: Boolean,
+    activeLabel: String,
     keyInput: String,
     onKeyChange: (String) -> Unit,
     activateState: Boolean?,
-    onActivate: () -> Unit
+    onActivate: () -> Unit,
+    buttonLabel: String,
+    buttonColor: Color = Color.Unspecified
 ) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(16.dp),
+    Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(MaterialTheme.colorScheme.surface),
-        elevation = CardDefaults.cardElevation(1.dp)
-    ) {
+        elevation = CardDefaults.cardElevation(1.dp)) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text(if (isPro) "YOUR LICENSE" else "ENTER LICENSE KEY",
-                style = MaterialTheme.typography.labelSmall,
+            Text(title, style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
 
-            if (isPro) {
+            if (isActive) {
                 Row(verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(10.dp),
                     modifier = Modifier.padding(8.dp)) {
                     Icon(Icons.Default.VerifiedUser, null,
                         tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(22.dp))
                     Column {
-                        Text("Pro is active on this device",
-                            style = MaterialTheme.typography.bodyMedium,
+                        Text(activeLabel, style = MaterialTheme.typography.bodyMedium,
                             fontWeight = FontWeight.SemiBold,
                             color = MaterialTheme.colorScheme.primary)
-                        Text("All Pro features are unlocked.",
+                        Text("All features in this tier are unlocked.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
@@ -419,7 +503,7 @@ private fun LicenseKeyCard(
                     value = keyInput,
                     onValueChange = onKeyChange,
                     label = { Text("License key") },
-                    placeholder = { Text("TGPRO-XXXX-XXXX-XXXX") },
+                    placeholder = { Text(placeholder) },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
@@ -434,8 +518,8 @@ private fun LicenseKeyCard(
                                    else MaterialTheme.colorScheme.error
                         )
                         Text(
-                            if (success) "Pro unlocked — enjoy all features!"
-                            else "Invalid key. Double-check and try again.",
+                            if (success) "Activated! Enjoy your features."
+                            else "Invalid or expired key. Double-check and try again.",
                             style = MaterialTheme.typography.bodySmall,
                             color = if (success) MaterialTheme.colorScheme.primary
                                     else MaterialTheme.colorScheme.error
@@ -447,11 +531,14 @@ private fun LicenseKeyCard(
                     onClick = onActivate,
                     enabled = keyInput.isNotBlank(),
                     modifier = Modifier.fillMaxWidth().height(48.dp),
-                    shape = RoundedCornerShape(12.dp)
+                    shape = RoundedCornerShape(12.dp),
+                    colors = if (buttonColor != Color.Unspecified)
+                        ButtonDefaults.buttonColors(containerColor = buttonColor)
+                    else ButtonDefaults.buttonColors()
                 ) {
                     Icon(Icons.Default.WorkspacePremium, null, Modifier.size(18.dp))
                     Spacer(Modifier.width(8.dp))
-                    Text("Activate Pro", style = MaterialTheme.typography.labelLarge)
+                    Text(buttonLabel, style = MaterialTheme.typography.labelLarge)
                 }
             }
         }

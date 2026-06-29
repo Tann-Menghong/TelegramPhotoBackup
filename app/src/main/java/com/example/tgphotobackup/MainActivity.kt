@@ -66,6 +66,11 @@ import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.filled.AllInbox
+import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.IosShare
+import androidx.compose.material.icons.filled.Security
+import androidx.compose.material.icons.filled.SyncAlt
 import androidx.compose.material.icons.filled.VerifiedUser
 import androidx.compose.material.icons.filled.WorkspacePremium
 import androidx.compose.material.icons.filled.Warning
@@ -121,6 +126,7 @@ import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
@@ -184,6 +190,7 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
                 var selectedPhotoIndex by remember { mutableStateOf<Int?>(null) }
                 val allPhotos          by vm.allBackedUpPhotos.collectAsState()
                 val isPro              by vm.isPro.collectAsState()
+                val isProMax           by vm.isProMax.collectAsState()
 
                 val snackbarHostState = remember { SnackbarHostState() }
                 val scope = rememberCoroutineScope()
@@ -218,11 +225,17 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
                                 actions = {
                                     IconButton(onClick = { showPro = true }) {
                                         Icon(
-                                            if (isPro) Icons.Default.VerifiedUser
-                                            else Icons.Default.WorkspacePremium,
+                                            when {
+                                                isProMax -> Icons.Default.AutoAwesome
+                                                isPro    -> Icons.Default.VerifiedUser
+                                                else     -> Icons.Default.WorkspacePremium
+                                            },
                                             contentDescription = "Pro",
-                                            tint = if (isPro) MaterialTheme.colorScheme.primary
-                                                   else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                                            tint = when {
+                                                isProMax -> Color(0xFFFFB300)
+                                                isPro    -> MaterialTheme.colorScheme.primary
+                                                else     -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                                            }
                                         )
                                     }
                                     IconButton(onClick = {
@@ -233,7 +246,9 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
                                             autoDeleteAfterBackup = settings.autoDeleteAfterBackup,
                                             themeMode = newMode,
                                             includedAlbums = settings.includedAlbums,
-                                            updateUrl = settings.updateUrl)
+                                            updateUrl = settings.updateUrl,
+                                            encryptBackup = settings.encryptBackup,
+                                            autoIndexBackup = settings.autoIndexBackup)
                                     }) {
                                         Icon(when (settings.themeMode) {
                                             2    -> Icons.Default.LightMode
@@ -925,11 +940,13 @@ private fun WeeklyChart(runs: List<BackupRun>) {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun SettingsScreen(vm: MainViewModel, onBack: () -> Unit, onUpgrade: () -> Unit = {}) {
-    val settings   by vm.settings.collectAsState()
-    val connResult by vm.connectionResult.collectAsState()
-    val isTesting  by vm.isTestingConnection.collectAsState()
-    val allPhotos  by vm.allBackedUpPhotos.collectAsState()
-    val isPro      by vm.isPro.collectAsState()
+    val settings     by vm.settings.collectAsState()
+    val connResult   by vm.connectionResult.collectAsState()
+    val isTesting    by vm.isTestingConnection.collectAsState()
+    val allPhotos    by vm.allBackedUpPhotos.collectAsState()
+    val isPro        by vm.isPro.collectAsState()
+    val isProMax     by vm.isProMax.collectAsState()
+    val proExpiresAt by vm.proExpiresAt.collectAsState()
 
     // Known albums from backed-up photos
     val availableAlbums = remember(allPhotos) {
@@ -963,6 +980,8 @@ private fun SettingsScreen(vm: MainViewModel, onBack: () -> Unit, onUpgrade: () 
     var includedAlbums     by remember(settings.includedAlbums)         { mutableStateOf(settings.includedAlbums) }
     var intervalHours      by remember(settings.autoBackupIntervalHours){ mutableIntStateOf(settings.autoBackupIntervalHours) }
     var updateUrl          by remember(settings.updateUrl)              { mutableStateOf(settings.updateUrl) }
+    var encryptBackup      by remember(settings.encryptBackup)     { mutableStateOf(settings.encryptBackup) }
+    var autoIndexBackup    by remember(settings.autoIndexBackup)   { mutableStateOf(settings.autoIndexBackup) }
     var showIntervalMenu   by remember { mutableStateOf(false) }
     var showThemeMenu      by remember { mutableStateOf(false) }
 
@@ -1240,35 +1259,137 @@ private fun SettingsScreen(vm: MainViewModel, onBack: () -> Unit, onUpgrade: () 
             if (!isPro) ProBadge(onUpgrade)
             } // end Box (Additional Folders)
 
-            // ── Pro ───────────────────────────────────────────
-            SettingsSection("Pro License") {
-                if (isPro) {
-                    Row(
+            // ── Pro License ───────────────────────────────────
+            SettingsSection("License") {
+                when {
+                    isProMax -> Row(
                         Modifier.fillMaxWidth().padding(8.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
-                        Icon(Icons.Default.VerifiedUser, null,
-                            tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(24.dp))
+                        Icon(Icons.Default.AutoAwesome, null,
+                            tint = Color(0xFFFFB300), modifier = Modifier.size(24.dp))
                         Column {
-                            Text("Pro Active", style = MaterialTheme.typography.titleSmall,
+                            Text("Pro Max Active · Lifetime",
+                                style = MaterialTheme.typography.titleSmall,
                                 fontWeight = FontWeight.SemiBold,
-                                color = MaterialTheme.colorScheme.primary)
-                            Text("All features unlocked",
+                                color = Color(0xFFFFB300))
+                            Text("All features unlocked forever.",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     }
-                } else {
-                    OutlinedButton(
+                    isPro -> Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Row(
+                            Modifier.fillMaxWidth().padding(8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            Icon(Icons.Default.VerifiedUser, null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(24.dp))
+                            Column {
+                                Text("Pro Active", style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.primary)
+                                Text(proExpiresAt.ifBlank { "Pro features unlocked" },
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                        OutlinedButton(
+                            onClick = onUpgrade,
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Icon(Icons.Default.AutoAwesome, null, Modifier.size(16.dp),
+                                tint = Color(0xFFFFB300))
+                            Spacer(Modifier.width(8.dp))
+                            Text("Upgrade to Pro Max — \$15 USD lifetime")
+                        }
+                    }
+                    else -> OutlinedButton(
                         onClick = onUpgrade,
                         modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(12.dp)
                     ) {
                         Icon(Icons.Default.WorkspacePremium, null, Modifier.size(16.dp))
                         Spacer(Modifier.width(8.dp))
-                        Text("Upgrade to Pro — \$5 USD")
+                        Text("Upgrade to Pro / Pro Max")
                     }
+                }
+            }
+
+            // ── Pro Max features ──────────────────────────────
+            SettingsSection("Pro Max Features") {
+                val ctx = LocalContext.current
+                Box {
+                    ToggleRow(Icons.Default.Security, "Encrypted backup",
+                        "AES-256 encrypt files before uploading to Telegram",
+                        encryptBackup && isProMax) { if (isProMax) encryptBackup = it }
+                    if (!isProMax) ProBadge(onUpgrade, badge = "MAX")
+                }
+                HorizontalDivider(Modifier.padding(vertical = 2.dp))
+                Box {
+                    ToggleRow(Icons.Default.SyncAlt, "Auto daily index backup",
+                        "Upload backup index to Telegram every 24 hours",
+                        autoIndexBackup && isProMax) { if (isProMax) autoIndexBackup = it }
+                    if (!isProMax) ProBadge(onUpgrade, badge = "MAX")
+                }
+                HorizontalDivider(Modifier.padding(vertical = 2.dp))
+                Box {
+                    Row(
+                        Modifier.fillMaxWidth().padding(vertical = 10.dp, horizontal = 4.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.IosShare, null,
+                                Modifier.size(20.dp), tint = MaterialTheme.colorScheme.primary)
+                            Column {
+                                Text("Export backup report",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.Medium)
+                                Text("Share a full log of all backed-up files",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                        FilledTonalButton(
+                            onClick = { if (isProMax) vm.exportReport(ctx) else onUpgrade() },
+                            shape = RoundedCornerShape(10.dp)
+                        ) { Text("Export") }
+                    }
+                    if (!isProMax) ProBadge(onUpgrade, badge = "MAX")
+                }
+                HorizontalDivider(Modifier.padding(vertical = 2.dp))
+                Box {
+                    val bulkStatus by vm.bulkRestoreStatus.collectAsState()
+                    Row(
+                        Modifier.fillMaxWidth().padding(vertical = 10.dp, horizontal = 4.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.AllInbox, null,
+                                Modifier.size(20.dp), tint = MaterialTheme.colorScheme.primary)
+                            Column {
+                                Text("Bulk restore all",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.Medium)
+                                Text(bulkStatus ?: "Restore entire backup to gallery",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                        FilledTonalButton(
+                            onClick = { if (isProMax) vm.bulkRestore(ctx) else onUpgrade() },
+                            shape = RoundedCornerShape(10.dp)
+                        ) { Text("Restore") }
+                    }
+                    if (!isProMax) ProBadge(onUpgrade, badge = "MAX")
                 }
             }
 
@@ -1285,7 +1406,9 @@ private fun SettingsScreen(vm: MainViewModel, onBack: () -> Unit, onUpgrade: () 
                         includedAlbums        = includedAlbums,
                         updateUrl             = updateUrl,
                         biometricLock         = biometricLock,
-                        safFolderUris         = if (isPro) safFolderUris else emptySet())
+                        safFolderUris         = if (isPro) safFolderUris else emptySet(),
+                        encryptBackup         = encryptBackup && isProMax,
+                        autoIndexBackup       = autoIndexBackup && isProMax)
                     onBack()
                 },
                 modifier = Modifier.fillMaxWidth().height(52.dp),
@@ -1381,7 +1504,8 @@ private fun SettingsSection(title: String, content: @Composable ColumnScope.() -
 }
 
 @Composable
-private fun BoxScope.ProBadge(onUpgrade: () -> Unit) {
+private fun BoxScope.ProBadge(onUpgrade: () -> Unit, badge: String = "PRO") {
+    val badgeColor = if (badge == "MAX") Color(0xFFFFB300) else MaterialTheme.colorScheme.primary
     Box(
         Modifier
             .matchParentSize()
@@ -1391,7 +1515,7 @@ private fun BoxScope.ProBadge(onUpgrade: () -> Unit) {
     ) {
         Surface(
             shape = RoundedCornerShape(8.dp),
-            color = MaterialTheme.colorScheme.primaryContainer,
+            color = badgeColor.copy(alpha = 0.15f),
             modifier = Modifier.padding(end = 16.dp)
         ) {
             Row(
@@ -1399,11 +1523,10 @@ private fun BoxScope.ProBadge(onUpgrade: () -> Unit) {
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(4.dp)
             ) {
-                Icon(Icons.Default.Lock, null, Modifier.size(12.dp),
-                    tint = MaterialTheme.colorScheme.primary)
-                Text("PRO", style = MaterialTheme.typography.labelSmall,
+                Icon(Icons.Default.Lock, null, Modifier.size(12.dp), tint = badgeColor)
+                Text(badge, style = MaterialTheme.typography.labelSmall,
                     fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.primary)
+                    color = badgeColor)
             }
         }
     }

@@ -14,10 +14,12 @@ import com.example.tgphotobackup.backup.BackupScheduler
 import com.example.tgphotobackup.backup.BackupWorker
 import com.example.tgphotobackup.backup.MediaStoreScanner
 import com.example.tgphotobackup.backup.NetworkChecker
+import com.example.tgphotobackup.backup.EncryptionManager
 import com.example.tgphotobackup.data.AppDatabase
 import com.example.tgphotobackup.data.AppSettings
 import com.example.tgphotobackup.data.BackupRun
 import com.example.tgphotobackup.data.FailedUpload
+import com.example.tgphotobackup.data.LicenseType
 import com.example.tgphotobackup.data.ProManager
 import com.example.tgphotobackup.data.SettingsRepository
 import com.example.tgphotobackup.data.UploadedPhoto
@@ -88,6 +90,14 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     val isPro: kotlinx.coroutines.flow.StateFlow<Boolean> = settings
         .map { it.isPro }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+
+    val isProMax: kotlinx.coroutines.flow.StateFlow<Boolean> = settings
+        .map { it.isProMax }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+
+    val proExpiresAt: kotlinx.coroutines.flow.StateFlow<String> = settings
+        .map { it.proExpiresAt }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), "")
 
     private val _stats = MutableStateFlow(LibraryStats())
     val stats = _stats.asStateFlow()
@@ -217,17 +227,20 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         includedAlbums: Set<String> = emptySet(),
         updateUrl: String = "",
         biometricLock: Boolean = false,
-        safFolderUris: Set<String> = emptySet()
+        safFolderUris: Set<String> = emptySet(),
+        encryptBackup: Boolean = false,
+        autoIndexBackup: Boolean = false
     ) {
         viewModelScope.launch {
             settingsRepo.save(
                 botToken, chatId, wifiOnly, autoBackup, includeVideos,
                 maxFileSizeMb, intervalHours, requiresCharging,
                 autoDeleteAfterBackup, themeMode, includedAlbums, updateUrl,
-                biometricLock, safFolderUris
+                biometricLock, safFolderUris, encryptBackup, autoIndexBackup
             )
             BackupScheduler.setPeriodic(getApplication(), autoBackup, wifiOnly,
                 intervalHours, requiresCharging)
+            BackupScheduler.setAutoIndex(getApplication(), autoIndexBackup)
         }
     }
 
@@ -282,9 +295,57 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     // ── Pro unlock ────────────────────────────────────────────────────────────
 
     fun unlockPro(key: String): Boolean {
-        if (!ProManager.validate(key)) return false
+        val type = ProManager.validate(key)
+        if (type !is LicenseType.ProMonthly) return false
+        if (!ProManager.isProActive(type)) return false  // expired
         viewModelScope.launch { settingsRepo.savePro(key) }
         return true
+    }
+
+    fun unlockProMax(key: String): Boolean {
+        val type = ProManager.validate(key)
+        if (!ProManager.isProMaxActive(type)) return false
+        viewModelScope.launch { settingsRepo.saveProMax(key) }
+        return true
+    }
+
+    // ── Export backup report (Pro Max) ────────────────────────────────────────
+
+    fun exportReport(context: Context) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val photos = _allBackedUpPhotos.value
+            val runs   = _backupRuns.value
+            val fmt    = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.getDefault())
+            val sb     = StringBuilder()
+            sb.appendLine("TG Backup Report — ${fmt.format(java.util.Date())}")
+            sb.appendLine("Total: ${photos.size} files · ${formatBytes(photos.sumOf { it.sizeBytes })}")
+            sb.appendLine()
+            sb.appendLine("=== BACKUP RUNS (${runs.size}) ===")
+            runs.forEach { run ->
+                sb.appendLine("${fmt.format(java.util.Date(run.finishedAt))} — " +
+                    "${run.uploaded} uploaded / ${run.skipped} skipped / ${run.failed} failed")
+            }
+            sb.appendLine()
+            sb.appendLine("=== FILES (${photos.size}) ===")
+            val dayFmt = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault())
+            photos.forEach { p ->
+                sb.appendLine("${dayFmt.format(java.util.Date(p.uploadedAt))} | " +
+                    "${p.displayName} | ${formatBytes(p.sizeBytes)} | ${p.bucketName}")
+            }
+            val file = java.io.File(context.cacheDir, "backup_report.txt")
+            file.writeText(sb.toString())
+            val uri = androidx.core.content.FileProvider.getUriForFile(
+                context, "${context.packageName}.provider", file)
+            val intent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                type = "text/plain"
+                putExtra(android.content.Intent.EXTRA_STREAM, uri)
+                addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            context.startActivity(android.content.Intent.createChooser(intent, "Export Backup Report").also {
+                it.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+            })
+        }
     }
 
     // ── Index backup ──────────────────────────────────────────────────────────
@@ -341,8 +402,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 }
             }
 
-            val saved = saveToGallery(getApplication(), photo.displayName, photo.mimeType, data)
-            _restoreStatus.value = if (saved) "Saved '${photo.displayName}' to gallery ✓"
+            val decKey = EncryptionManager.deriveKey(s.botToken)
+            val actualData = if (EncryptionManager.isEncryptedName(photo.displayName))
+                runCatching { EncryptionManager.decrypt(data, decKey) }.getOrDefault(data)
+            else data
+            val displayName = EncryptionManager.decryptedName(photo.displayName)
+            val saved = saveToGallery(getApplication(), displayName, photo.mimeType, actualData)
+            _restoreStatus.value = if (saved) "Saved '$displayName' to gallery ✓"
                                    else "Failed to save to gallery"
         }
     }
@@ -370,12 +436,17 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             val s = settingsRepo.settings.first()
             val client = TelegramClient(s.botToken)
             var restored = 0; var failed = 0
+            val decKey = EncryptionManager.deriveKey(s.botToken)
             photos.forEachIndexed { i, photo ->
                 _bulkRestoreStatus.value = "Restoring ${i + 1}/${photos.size}…"
                 runCatching {
                     val filePath = client.getFilePath(photo.fileId).getOrThrow()
-                    val data = client.downloadBytes(filePath).getOrThrow()
-                    if (saveToGallery(context, photo.displayName, photo.mimeType, data)) restored++ else failed++
+                    var data = client.downloadBytes(filePath).getOrThrow()
+                    if (EncryptionManager.isEncryptedName(photo.displayName)) {
+                        data = runCatching { EncryptionManager.decrypt(data, decKey) }.getOrDefault(data)
+                    }
+                    val name = EncryptionManager.decryptedName(photo.displayName)
+                    if (saveToGallery(context, name, photo.mimeType, data)) restored++ else failed++
                 }.onFailure { failed++ }
             }
             _bulkRestoreStatus.value = "Restored $restored files" +
@@ -522,6 +593,20 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             val filePath = client.getFilePath(photo.fileId).getOrElse { return null }
             val data     = client.downloadBytes(filePath).getOrElse { return null }
             file.writeBytes(data)
+        }
+
+        // Decrypt in-place if the file was encrypted
+        if (EncryptionManager.isEncryptedName(photo.displayName)) {
+            val decKey = EncryptionManager.deriveKey(s.botToken)
+            val decName = EncryptionManager.decryptedName(photo.displayName)
+            val decFile = java.io.File(shareDir, decName)
+            runCatching {
+                val decBytes = EncryptionManager.decrypt(file.readBytes(), decKey)
+                decFile.writeBytes(decBytes)
+                file.delete()
+                return androidx.core.content.FileProvider.getUriForFile(
+                    context, "${context.packageName}.provider", decFile)
+            }
         }
 
         return androidx.core.content.FileProvider.getUriForFile(
