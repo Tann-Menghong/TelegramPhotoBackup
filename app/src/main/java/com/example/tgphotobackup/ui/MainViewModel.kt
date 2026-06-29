@@ -18,6 +18,7 @@ import com.example.tgphotobackup.data.AppDatabase
 import com.example.tgphotobackup.data.AppSettings
 import com.example.tgphotobackup.data.BackupRun
 import com.example.tgphotobackup.data.FailedUpload
+import com.example.tgphotobackup.data.ProManager
 import com.example.tgphotobackup.data.SettingsRepository
 import com.example.tgphotobackup.data.UploadedPhoto
 import com.example.tgphotobackup.data.contentUri
@@ -83,6 +84,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     val settings = settingsRepo.settings.stateIn(
         viewModelScope, SharingStarted.WhileSubscribed(5_000), AppSettings()
     )
+
+    val isPro: kotlinx.coroutines.flow.StateFlow<Boolean> = settings
+        .map { it.isPro }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
 
     private val _stats = MutableStateFlow(LibraryStats())
     val stats = _stats.asStateFlow()
@@ -273,6 +278,14 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun clearConnectionResult() { _connectionResult.value = null }
+
+    // ── Pro unlock ────────────────────────────────────────────────────────────
+
+    fun unlockPro(key: String): Boolean {
+        if (!ProManager.validate(key)) return false
+        viewModelScope.launch { settingsRepo.savePro(key) }
+        return true
+    }
 
     // ── Index backup ──────────────────────────────────────────────────────────
 

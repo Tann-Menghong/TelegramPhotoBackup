@@ -25,7 +25,9 @@ data class AppSettings(
     val includedAlbums: Set<String> = emptySet(),  // empty = all albums
     val updateUrl: String = "https://github.com/Tann-Menghong/TelegramPhotoBackup",
     val biometricLock: Boolean = false,
-    val safFolderUris: Set<String> = emptySet()
+    val safFolderUris: Set<String> = emptySet(),
+    val licenseKey: String = "",
+    val isPro: Boolean = false
 ) {
     val isConfigured: Boolean get() = botToken.isNotBlank() && chatId.isNotBlank()
     val maxFileSizeBytes: Long get() = maxFileSizeMb.toLong() * 1024 * 1024
@@ -34,6 +36,7 @@ data class AppSettings(
 class SettingsRepository(private val context: Context) {
 
     val settings: Flow<AppSettings> = context.dataStore.data.map { p ->
+        val licKey = p[PRO_KEY] ?: ""
         AppSettings(
             botToken                = p[BOT_TOKEN] ?: "",
             chatId                  = p[CHAT_ID] ?: "",
@@ -54,7 +57,9 @@ class SettingsRepository(private val context: Context) {
             biometricLock           = p[BIOMETRIC_LOCK] ?: false,
             safFolderUris           = p[INCLUDED_SAF_FOLDERS]?.let { s ->
                 if (s.isBlank()) emptySet() else s.split("\n").filter { it.isNotBlank() }.toSet()
-            } ?: emptySet()
+            } ?: emptySet(),
+            licenseKey              = licKey,
+            isPro                   = licKey.isNotBlank() && ProManager.validate(licKey)
         )
     }
 
@@ -92,6 +97,10 @@ class SettingsRepository(private val context: Context) {
         }
     }
 
+    suspend fun savePro(key: String) {
+        context.dataStore.edit { p -> p[PRO_KEY] = key.trim() }
+    }
+
     companion object {
         private val BOT_TOKEN                  = stringPreferencesKey("bot_token")
         private val CHAT_ID                    = stringPreferencesKey("chat_id")
@@ -107,5 +116,6 @@ class SettingsRepository(private val context: Context) {
         private val UPDATE_URL                 = stringPreferencesKey("update_url")
         private val BIOMETRIC_LOCK             = booleanPreferencesKey("biometric_lock")
         private val INCLUDED_SAF_FOLDERS       = stringPreferencesKey("included_saf_folders")
+        private val PRO_KEY                    = stringPreferencesKey("pro_key")
     }
 }

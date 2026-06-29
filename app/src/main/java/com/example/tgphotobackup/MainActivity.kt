@@ -27,9 +27,11 @@ import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
@@ -65,6 +67,7 @@ import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.VerifiedUser
+import androidx.compose.material.icons.filled.WorkspacePremium
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.filled.WifiOff
 import androidx.compose.material.icons.filled.Add
@@ -174,11 +177,13 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
                 }
 
                 var showSettings       by remember { mutableStateOf(false) }
+                var showPro            by remember { mutableStateOf(false) }
                 var selectedTab        by remember { mutableIntStateOf(0) }
                 val biometricLock = settings.biometricLock
                 var isLocked by remember(biometricLock) { mutableStateOf(biometricLock) }
                 var selectedPhotoIndex by remember { mutableStateOf<Int?>(null) }
                 val allPhotos          by vm.allBackedUpPhotos.collectAsState()
+                val isPro              by vm.isPro.collectAsState()
 
                 val snackbarHostState = remember { SnackbarHostState() }
                 val scope = rememberCoroutineScope()
@@ -211,6 +216,15 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
                                         fontWeight = FontWeight.SemiBold)
                                 },
                                 actions = {
+                                    IconButton(onClick = { showPro = true }) {
+                                        Icon(
+                                            if (isPro) Icons.Default.VerifiedUser
+                                            else Icons.Default.WorkspacePremium,
+                                            contentDescription = "Pro",
+                                            tint = if (isPro) MaterialTheme.colorScheme.primary
+                                                   else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                                        )
+                                    }
                                     IconButton(onClick = {
                                         val newMode = when (settings.themeMode) { 2 -> 1; 1 -> 0; else -> 2 }
                                         vm.save(settings.botToken, settings.chatId, settings.wifiOnly, settings.autoBackup,
@@ -292,7 +306,18 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
                         enter = slideInHorizontally(animationSpec = tween(380)) { it } + fadeIn(tween(350)),
                         exit  = slideOutHorizontally(animationSpec = tween(330)) { it } + fadeOut(tween(300))
                     ) {
-                        SettingsScreen(vm) { showSettings = false }
+                        SettingsScreen(
+                            vm,
+                            onBack    = { showSettings = false },
+                            onUpgrade = { showSettings = false; showPro = true }
+                        )
+                    }
+                    AnimatedVisibility(
+                        visible = showPro,
+                        enter = slideInHorizontally(animationSpec = tween(380)) { it } + fadeIn(tween(350)),
+                        exit  = slideOutHorizontally(animationSpec = tween(330)) { it } + fadeOut(tween(300))
+                    ) {
+                        com.example.tgphotobackup.ui.ProScreen(vm) { showPro = false }
                     }
                     if (isLocked) {
                         LockScreen { isLocked = false }
@@ -899,11 +924,12 @@ private fun WeeklyChart(runs: List<BackupRun>) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun SettingsScreen(vm: MainViewModel, onBack: () -> Unit) {
+private fun SettingsScreen(vm: MainViewModel, onBack: () -> Unit, onUpgrade: () -> Unit = {}) {
     val settings   by vm.settings.collectAsState()
     val connResult by vm.connectionResult.collectAsState()
     val isTesting  by vm.isTestingConnection.collectAsState()
     val allPhotos  by vm.allBackedUpPhotos.collectAsState()
+    val isPro      by vm.isPro.collectAsState()
 
     // Known albums from backed-up photos
     val availableAlbums = remember(allPhotos) {
@@ -1000,39 +1026,58 @@ private fun SettingsScreen(vm: MainViewModel, onBack: () -> Unit) {
                 ToggleRow(Icons.Default.WifiOff, "Wi-Fi only",
                     "Don't upload on mobile data", wifiOnly) { wifiOnly = it }
                 HorizontalDivider(Modifier.padding(vertical = 2.dp))
-                ToggleRow(Icons.Default.CloudUpload, "Auto backup",
-                    "Run in background automatically", autoBackup) { autoBackup = it }
-                AnimatedVisibility(autoBackup) {
+                Box {
                     Column {
-                        HorizontalDivider(Modifier.padding(vertical = 2.dp))
-                        Row(Modifier.fillMaxWidth().padding(vertical = 10.dp, horizontal = 4.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically) {
-                            Text("Interval", style = MaterialTheme.typography.bodyMedium)
-                            Box {
-                                TextButton(onClick = { showIntervalMenu = true }) {
-                                    Text(intervalOptions.find { it.first == intervalHours }?.second
-                                        ?: "Every 12 hours", color = MaterialTheme.colorScheme.primary)
-                                }
-                                DropdownMenu(showIntervalMenu, { showIntervalMenu = false }) {
-                                    intervalOptions.forEach { (h, label) ->
-                                        DropdownMenuItem(text = { Text(label) },
-                                            onClick = { intervalHours = h; showIntervalMenu = false })
+                        ToggleRow(Icons.Default.CloudUpload, "Auto backup",
+                            "Run in background automatically", autoBackup && isPro) {
+                            if (isPro) autoBackup = it
+                        }
+                        AnimatedVisibility(autoBackup && isPro) {
+                            Column {
+                                HorizontalDivider(Modifier.padding(vertical = 2.dp))
+                                Row(Modifier.fillMaxWidth().padding(vertical = 10.dp, horizontal = 4.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically) {
+                                    Text("Interval", style = MaterialTheme.typography.bodyMedium)
+                                    Box {
+                                        TextButton(onClick = { showIntervalMenu = true }) {
+                                            Text(intervalOptions.find { it.first == intervalHours }?.second
+                                                ?: "Every 12 hours", color = MaterialTheme.colorScheme.primary)
+                                        }
+                                        DropdownMenu(showIntervalMenu, { showIntervalMenu = false }) {
+                                            intervalOptions.forEach { (h, label) ->
+                                                DropdownMenuItem(text = { Text(label) },
+                                                    onClick = { intervalHours = h; showIntervalMenu = false })
+                                            }
+                                        }
                                     }
+                                }
+                                HorizontalDivider(Modifier.padding(vertical = 2.dp))
+                                ToggleRow(Icons.Default.BatteryChargingFull, "Only when charging",
+                                    "Auto backup runs only while plugged in", charging && isPro) {
+                                    if (isPro) charging = it
                                 }
                             }
                         }
-                        HorizontalDivider(Modifier.padding(vertical = 2.dp))
-                        ToggleRow(Icons.Default.BatteryChargingFull, "Only when charging",
-                            "Auto backup runs only while plugged in", charging) { charging = it }
                     }
+                    if (!isPro) ProBadge(onUpgrade)
                 }
                 HorizontalDivider(Modifier.padding(vertical = 2.dp))
-                ToggleRow(Icons.Default.PhotoLibrary, "Include videos",
-                    "Also back up video files", includeVideos) { includeVideos = it }
+                Box {
+                    ToggleRow(Icons.Default.PhotoLibrary, "Include videos",
+                        "Also back up video files", includeVideos && isPro) {
+                        if (isPro) includeVideos = it
+                    }
+                    if (!isPro) ProBadge(onUpgrade)
+                }
                 HorizontalDivider(Modifier.padding(vertical = 2.dp))
-                ToggleRow(Icons.Default.AutoDelete, "Auto-delete after backup",
-                    "Remove local copy once safely uploaded", autoDelete) { autoDelete = it }
+                Box {
+                    ToggleRow(Icons.Default.AutoDelete, "Auto-delete after backup",
+                        "Remove local copy once safely uploaded", autoDelete && isPro) {
+                        if (isPro) autoDelete = it
+                    }
+                    if (!isPro) ProBadge(onUpgrade)
+                }
                 HorizontalDivider(Modifier.padding(vertical = 2.dp))
                 ToggleRow(Icons.Default.Fingerprint, "App lock",
                     "Require biometrics to open the app", biometricLock) { biometricLock = it }
@@ -1152,6 +1197,7 @@ private fun SettingsScreen(vm: MainViewModel, onBack: () -> Unit) {
             }
 
             // ── Additional Folders ──────────────────────────────
+            Box {
             SettingsSection("Additional Folders") {
                 Text(
                     if (safFolderUris.isEmpty()) "Only backing up from Camera roll (default)"
@@ -1182,7 +1228,7 @@ private fun SettingsScreen(vm: MainViewModel, onBack: () -> Unit) {
                 }
                 Spacer(Modifier.height(4.dp))
                 FilledTonalButton(
-                    onClick = { safLauncher.launch(null) },
+                    onClick = { if (isPro) safLauncher.launch(null) else onUpgrade() },
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(12.dp)
                 ) {
@@ -1191,15 +1237,55 @@ private fun SettingsScreen(vm: MainViewModel, onBack: () -> Unit) {
                     Text("Add folder")
                 }
             }
+            if (!isPro) ProBadge(onUpgrade)
+            } // end Box (Additional Folders)
+
+            // ── Pro ───────────────────────────────────────────
+            SettingsSection("Pro License") {
+                if (isPro) {
+                    Row(
+                        Modifier.fillMaxWidth().padding(8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Icon(Icons.Default.VerifiedUser, null,
+                            tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(24.dp))
+                        Column {
+                            Text("Pro Active", style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.primary)
+                            Text("All features unlocked",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                } else {
+                    OutlinedButton(
+                        onClick = onUpgrade,
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Icon(Icons.Default.WorkspacePremium, null, Modifier.size(16.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text("Upgrade to Pro — \$5 USD")
+                    }
+                }
+            }
 
             // ── Save ──────────────────────────────────────────
             Button(
                 onClick = {
-                    vm.save(token, chatId, wifiOnly, autoBackup, includeVideos,
-                        intervalHours = intervalHours, requiresCharging = charging,
-                        autoDeleteAfterBackup = autoDelete, themeMode = themeMode,
-                        includedAlbums = includedAlbums, updateUrl = updateUrl,
-                        biometricLock = biometricLock, safFolderUris = safFolderUris)
+                    vm.save(token, chatId, wifiOnly,
+                        autoBackup            = autoBackup && isPro,
+                        includeVideos         = includeVideos && isPro,
+                        intervalHours         = intervalHours,
+                        requiresCharging      = charging && isPro,
+                        autoDeleteAfterBackup = autoDelete && isPro,
+                        themeMode             = themeMode,
+                        includedAlbums        = includedAlbums,
+                        updateUrl             = updateUrl,
+                        biometricLock         = biometricLock,
+                        safFolderUris         = if (isPro) safFolderUris else emptySet())
                     onBack()
                 },
                 modifier = Modifier.fillMaxWidth().height(52.dp),
@@ -1290,6 +1376,35 @@ private fun SettingsSection(title: String, content: @Composable ColumnScope.() -
             colors = CardDefaults.cardColors(MaterialTheme.colorScheme.surface),
             elevation = CardDefaults.cardElevation(1.dp)) {
             Column(Modifier.padding(16.dp), content = content)
+        }
+    }
+}
+
+@Composable
+private fun BoxScope.ProBadge(onUpgrade: () -> Unit) {
+    Box(
+        Modifier
+            .matchParentSize()
+            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.80f))
+            .clickable { onUpgrade() },
+        contentAlignment = Alignment.CenterEnd
+    ) {
+        Surface(
+            shape = RoundedCornerShape(8.dp),
+            color = MaterialTheme.colorScheme.primaryContainer,
+            modifier = Modifier.padding(end = 16.dp)
+        ) {
+            Row(
+                Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                Icon(Icons.Default.Lock, null, Modifier.size(12.dp),
+                    tint = MaterialTheme.colorScheme.primary)
+                Text("PRO", style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary)
+            }
         }
     }
 }
