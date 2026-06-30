@@ -142,6 +142,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val _bulkRestoreStatus = MutableStateFlow<String?>(null)
     val bulkRestoreStatus = _bulkRestoreStatus.asStateFlow()
 
+    // Rate-limiting state for license key entry
+    private var licenseAttempts = 0
+    private var licenseLockUntil = 0L
+    private val _licenseLockoutSeconds = MutableStateFlow(0L)
+    val licenseLockoutSeconds = _licenseLockoutSeconds.asStateFlow()
+
     // Duplicate groups: photos sharing the same contentHash
     val duplicates: kotlinx.coroutines.flow.StateFlow<List<List<UploadedPhoto>>> =
         _allBackedUpPhotos
@@ -295,18 +301,49 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     // ── Pro unlock ────────────────────────────────────────────────────────────
 
     fun unlockPro(key: String): Boolean {
+        val now = System.currentTimeMillis()
+        if (now < licenseLockUntil) {
+            _licenseLockoutSeconds.value = (licenseLockUntil - now) / 1000
+            return false
+        }
         val type = ProManager.validate(key)
-        if (type !is LicenseType.ProMonthly) return false
-        if (!ProManager.isProActive(type)) return false  // expired
+        if (type !is LicenseType.ProMonthly || !ProManager.isProActive(type)) {
+            recordFailedAttempt(now)
+            return false
+        }
+        clearLockout()
         viewModelScope.launch { settingsRepo.savePro(key) }
         return true
     }
 
     fun unlockProMax(key: String): Boolean {
+        val now = System.currentTimeMillis()
+        if (now < licenseLockUntil) {
+            _licenseLockoutSeconds.value = (licenseLockUntil - now) / 1000
+            return false
+        }
         val type = ProManager.validate(key)
-        if (!ProManager.isProMaxActive(type)) return false
+        if (!ProManager.isProMaxActive(type)) {
+            recordFailedAttempt(now)
+            return false
+        }
+        clearLockout()
         viewModelScope.launch { settingsRepo.saveProMax(key) }
         return true
+    }
+
+    private fun recordFailedAttempt(now: Long) {
+        licenseAttempts++
+        if (licenseAttempts >= 5) {
+            // 15 s × extra attempts, capped at 5 minutes
+            val delay = minOf(licenseAttempts * 15_000L, 300_000L)
+            licenseLockUntil = now + delay
+            _licenseLockoutSeconds.value = delay / 1000
+        }
+    }
+
+    private fun clearLockout() {
+        licenseAttempts = 0; licenseLockUntil = 0L; _licenseLockoutSeconds.value = 0L
     }
 
     // ── Export backup report (Pro Max) ────────────────────────────────────────

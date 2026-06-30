@@ -76,10 +76,11 @@ fun ProScreen(vm: MainViewModel, onBack: () -> Unit) {
     val isProMax    by vm.isProMax.collectAsState()
     val proExpiresAt by vm.proExpiresAt.collectAsState()
 
-    var proKeyInput     by remember { mutableStateOf("") }
-    var proActivate     by remember { mutableStateOf<Boolean?>(null) }
-    var maxKeyInput     by remember { mutableStateOf("") }
-    var maxActivate     by remember { mutableStateOf<Boolean?>(null) }
+    var proKeyInput      by remember { mutableStateOf("") }
+    var proActivate      by remember { mutableStateOf<Boolean?>(null) }
+    var maxKeyInput      by remember { mutableStateOf("") }
+    var maxActivate      by remember { mutableStateOf<Boolean?>(null) }
+    val lockoutSeconds   by vm.licenseLockoutSeconds.collectAsState()
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
@@ -143,15 +144,16 @@ fun ProScreen(vm: MainViewModel, onBack: () -> Unit) {
                 )
                 QrCard()
                 KeyEntryCard(
-                    title         = if (isPro) "PRO LICENSE ACTIVE" else "ENTER PRO KEY",
-                    placeholder   = "PROM-YYYYMM-XXXX-CCCC",
-                    isActive      = isPro,
-                    activeLabel   = "Pro is active · $proExpiresAt",
-                    keyInput      = proKeyInput,
-                    onKeyChange   = { proKeyInput = it; proActivate = null },
-                    activateState = proActivate,
-                    onActivate    = { proActivate = vm.unlockPro(proKeyInput.trim()) },
-                    buttonLabel   = "Activate Pro"
+                    title          = if (isPro) "PRO LICENSE ACTIVE" else "ENTER PRO KEY",
+                    placeholder    = "PROM-YYYYMM-XXXX-CCCC-CCCC",
+                    isActive       = isPro,
+                    activeLabel    = "Pro is active · $proExpiresAt",
+                    keyInput       = proKeyInput,
+                    onKeyChange    = { proKeyInput = it; proActivate = null },
+                    activateState  = proActivate,
+                    onActivate     = { proActivate = vm.unlockPro(proKeyInput.trim()) },
+                    buttonLabel    = "Activate Pro",
+                    lockoutSeconds = lockoutSeconds
                 )
             }
 
@@ -172,16 +174,17 @@ fun ProScreen(vm: MainViewModel, onBack: () -> Unit) {
             )
             if (!isProMax) QrCard()
             KeyEntryCard(
-                title         = if (isProMax) "PRO MAX LICENSE ACTIVE" else "ENTER PRO MAX KEY",
-                placeholder   = "PMAX-XXXX-XXXX-CCCC",
-                isActive      = isProMax,
-                activeLabel   = "Pro Max is active · Lifetime",
-                keyInput      = maxKeyInput,
-                onKeyChange   = { maxKeyInput = it; maxActivate = null },
-                activateState = maxActivate,
-                onActivate    = { maxActivate = vm.unlockProMax(maxKeyInput.trim()) },
-                buttonLabel   = "Activate Pro Max",
-                buttonColor   = Color(0xFFFFB300)
+                title          = if (isProMax) "PRO MAX LICENSE ACTIVE" else "ENTER PRO MAX KEY",
+                placeholder    = "PMAX-XXXX-XXXX-CCCC-CCCC",
+                isActive       = isProMax,
+                activeLabel    = "Pro Max is active · Lifetime",
+                keyInput       = maxKeyInput,
+                onKeyChange    = { maxKeyInput = it; maxActivate = null },
+                activateState  = maxActivate,
+                onActivate     = { maxActivate = vm.unlockProMax(maxKeyInput.trim()) },
+                buttonLabel    = "Activate Pro Max",
+                buttonColor    = Color(0xFFFFB300),
+                lockoutSeconds = lockoutSeconds
             )
 
             Spacer(Modifier.height(16.dp))
@@ -474,8 +477,11 @@ private fun KeyEntryCard(
     activateState: Boolean?,
     onActivate: () -> Unit,
     buttonLabel: String,
-    buttonColor: Color = Color.Unspecified
+    buttonColor: Color = Color.Unspecified,
+    lockoutSeconds: Long = 0L
 ) {
+    val isLockedOut = lockoutSeconds > 0L
+
     Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(MaterialTheme.colorScheme.surface),
         elevation = CardDefaults.cardElevation(1.dp)) {
@@ -505,31 +511,41 @@ private fun KeyEntryCard(
                     label = { Text("License key") },
                     placeholder = { Text(placeholder) },
                     singleLine = true,
+                    enabled = !isLockedOut,
                     modifier = Modifier.fillMaxWidth()
                 )
 
-                activateState?.let { success ->
-                    Row(verticalAlignment = Alignment.CenterVertically,
+                when {
+                    isLockedOut -> Row(verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Icon(Icons.Default.Lock, null, Modifier.size(16.dp),
+                            tint = MaterialTheme.colorScheme.error)
+                        Text("Too many failed attempts. Try again in ${lockoutSeconds}s.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error)
+                    }
+                    activateState != null -> Row(verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         Icon(
-                            if (success) Icons.Default.CheckCircle else Icons.Default.Warning,
+                            if (activateState) Icons.Default.CheckCircle else Icons.Default.Warning,
                             null, Modifier.size(16.dp),
-                            tint = if (success) MaterialTheme.colorScheme.primary
+                            tint = if (activateState) MaterialTheme.colorScheme.primary
                                    else MaterialTheme.colorScheme.error
                         )
                         Text(
-                            if (success) "Activated! Enjoy your features."
+                            if (activateState) "Activated! Enjoy your features."
                             else "Invalid or expired key. Double-check and try again.",
                             style = MaterialTheme.typography.bodySmall,
-                            color = if (success) MaterialTheme.colorScheme.primary
+                            color = if (activateState) MaterialTheme.colorScheme.primary
                                     else MaterialTheme.colorScheme.error
                         )
                     }
+                    else -> {}
                 }
 
                 Button(
                     onClick = onActivate,
-                    enabled = keyInput.isNotBlank(),
+                    enabled = keyInput.isNotBlank() && !isLockedOut,
                     modifier = Modifier.fillMaxWidth().height(48.dp),
                     shape = RoundedCornerShape(12.dp),
                     colors = if (buttonColor != Color.Unspecified)
